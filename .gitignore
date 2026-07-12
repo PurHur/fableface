@@ -1,0 +1,10 @@
+# dev-only: playwright, installed ad-hoc for the visual tests (no manifest)
+node_modules/
+
+# generated test artifacts (screenshots written by test/shots.mjs & e2e runs)
+test/*.png
+test/wisp2-shots/
+
+# misc
+.DS_Store
+*.log

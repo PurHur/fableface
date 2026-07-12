@@ -1,0 +1,642 @@
+// face-wisp4.js — WISP IV: SIGNAL BEING.
+// A presence whose inner state is physically visible in its own light.
+// MATERIAL   fresnel-rim hollow glass (Joi backshell) + thin LiDAR honesty
+// METABOLISM curl breath (feature-masked) + Cortana data-skin code crawl
+// NERVES     startle dodge (reaction-at-a-distance) · cortical thought-storms
+//            (epicenter waves, rate = cognition) · uncertainty moiré (doubt)
+//            · pause-freeze on interrupts
+// VOICE      chromatic R/G/B plane separation misconverging with speech ·
+//            scan pulses: outward from the mouth speaking, converging listening
+// TRANSITION slice-plane materialization (wake) · ink dissolve (sleep) ·
+//            rampancy ghost duplicates (alarm only)
+// RINGS      instrument tiers: inner = live emotion arc, outer = voice waveform
+// Rule from the animacy research: nothing loud is periodic or always-on.
+
+import { program, fullscreenVAO } from './gl.js';
+import { GLSL_COMMON, GLSL_SDF, GLSL_EYE, glslHeader } from './headsdf.js';
+import { sampleSurfaceWeighted, extractFeatureEdges, mulberry32 } from './gridmesh.js';
+import { SCENE_BG_VS as HOLO_BG_VS, SCENE_BG_FS as HOLO_BG_FS } from './scenes.js';
+
+const EMO_COL = {
+  neutral: [0.20, 0.80, 1.00], joy: [1.0, 0.72, 0.25], delight: [1.0, 0.62, 0.3],
+  warm: [1.0, 0.5, 0.55], love: [1.0, 0.32, 0.6], proud: [0.95, 0.75, 0.3],
+  mischievous: [0.7, 0.35, 1.0], awe: [0.55, 0.7, 1.0], sad: [0.25, 0.42, 0.95],
+  angry: [1.0, 0.26, 0.12], irritated: [1.0, 0.45, 0.2], fear: [0.72, 0.72, 0.95],
+  disgust: [0.5, 0.9, 0.4], embarrassed: [1.0, 0.5, 0.5], curious: [0.5, 0.68, 1.0],
+  confused: [0.72, 0.58, 1.0], thinking: [0.45, 0.55, 1.0], skeptical: [0.6, 0.7, 0.9],
+  determined: [0.95, 0.85, 0.35], concerned: [0.55, 0.72, 0.95], surprise: [0.95, 0.9, 0.45],
+  bored: [0.3, 0.6, 0.7], sleepy: [0.22, 0.5, 0.62], alarm: [1.0, 0.18, 0.15],
+};
+
+const QUAD_VS = `#version 300 es
+layout(location=0) in vec2 aPos;
+out vec2 vUv;
+void main(){ vUv = aPos*0.5 + 0.5; gl_Position = vec4(aPos, 0.0, 1.0); }
+`;
+
+const DECAY_FS = `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uPrev;
+uniform float uDecay;
+out vec4 outColor;
+void main(){
+  vec2 uv = (vUv - 0.5)*0.9982 + 0.5 + vec2(0.0, -0.00055);
+  vec3 c = texture(uPrev, uv).rgb*uDecay;
+  c = max(c - 0.0015, 0.0);
+  outColor = vec4(c, 1.0);
+}
+`;
+
+const COMP_FS = `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uTex;
+uniform float uGain;
+out vec4 outColor;
+void main(){ outColor = vec4(texture(uTex, vUv).rgb*uGain, 1.0); }
+`;
+
+const PT_VS = glslHeader() + GLSL_COMMON + GLSL_SDF + GLSL_EYE + /* glsl */ `
+layout(location=0) in vec3 aPos;   // vol/contour: pos · ring: (cos·r, lvl, sin·r) · iris: (r, ang, side)
+layout(location=1) in vec3 aNrm;
+layout(location=2) in float aMat;
+layout(location=3) in float aSeed;
+layout(location=4) in float aType;   // 0 volume, 1 contour, 2 ring, 3 iris
+
+uniform mat4 uProj, uView;
+uniform mat3 uHeadRot;
+uniform vec3 uHeadPos, uCamPos, uCamRight, uCamFwd;
+uniform float uTime, uReveal, uPixelScale, uMirror, uGhost;
+uniform vec3 uGhostOff;
+uniform float uJaw, uSpread, uBlink, uBrowL, uBrowR, uLevel, uGlow, uReactW, uBreath;
+uniform float uDoubt, uFreeze, uSleep, uStormRate, uPulseDir, uIntensity;
+uniform float uEnergy, uGestureW, uEmoPulse;
+uniform vec3 uGazeDir, uEmoCol;
+
+out vec3 vColor;
+out float vFade;
+flat out float vType;
+
+void main(){
+  vType = aType;
+  bool isRing = aType > 1.5 && aType < 2.5;
+  bool isContour = aType > 0.5 && aType < 1.5;
+  bool isIris = aType > 2.5;
+  float motion = 1.0 - 0.92*uFreeze;   // pause-freeze kills self-motion
+
+  vec3 p = aPos;
+  float spark = 0.0, feed = 0.0;
+  float ta = 1.0, lifeA = 1.0, vFade0 = 1.0;
+  vec3 base = mix(vec3(0.20, 0.80, 1.00), uEmoCol, clamp(uGlow*1.7 + uEmoPulse*0.4, 0.0, 0.92));
+  vec3 holo = base;
+
+  if (isIris) {
+    float r = aPos.x, ang = aPos.y, side = aPos.z;
+    vec3 eyeC = vec3(EYE_X*side, 0.0, 0.050);
+    vec3 gd = normalize(uGazeDir + vec3(-side*0.04, 0.0, 0.0));
+    vec3 right = normalize(cross(vec3(0.0, 1.0, 0.0), gd));
+    vec3 up = cross(gd, right);
+    float pupilR = 0.0018*(uPupil > 0.01 ? uPupil : 1.0);
+    float orbiter = step(0.968, aSeed);
+    float rr = r, aa = ang;
+    if (orbiter > 0.5) { rr = 0.00540; aa = aSeed*371.0 + uTime*(1.1 + aSeed)*motion; }
+    rr = max(rr, pupilR + 0.0004 + rr*0.06*uLevel);
+    float blinkC = clamp(uBlink, 0.0, 1.0);
+    float yy = sin(aa)*rr*(1.0 - 0.35*blinkC);
+    p = eyeC + gd*0.02415 + right*(cos(aa)*rr) + up*yy;
+    float cut = mix(0.0062, -0.0045, blinkC) - 0.0012*clamp(-uBlink, 0.0, 0.4);
+    vFade0 *= 1.0 - smoothstep(cut - 0.0009, cut + 0.0009, yy);
+    vFade0 *= 1.0 - smoothstep(0.72, 0.94, blinkC);
+    float spin = uTime*0.35*motion + side*1.7;
+    float spokes = 0.55 + 0.45*sin(aa*14.0 + spin + sin(aa*5.0 - spin*0.7));
+    float limbal = exp(-pow((rr - 0.00480)*3000.0, 2.0));
+    float hole = smoothstep(pupilR, pupilR + 0.0006, rr);
+    vec3 irisTint = mix(vec3(0.45, 0.95, 1.05), uEmoCol*1.15, clamp(uGlow*0.8, 0.0, 0.7));
+    base = irisTint*(0.30 + 0.42*spokes*(1.0 - 0.5*rr/0.0051) + 1.1*limbal)*hole;
+    base += irisTint*orbiter*1.3;
+    ta = clamp((uReveal - 0.3)/0.6, 0.0, 1.0);
+  } else if (isRing) {
+    // ---- INSTRUMENT RINGS: inner = emotion arc, outer = voice waveform ----
+    float inner = step(aSeed, 0.4999); // seed band encodes ring id (bake-time)
+    float dir = inner > 0.5 ? 1.0 : -1.0;
+    float w = uTime*(0.20 + aSeed*0.1)*dir*motion*clamp(0.45 + 0.6*uEnergy, 0.5, 1.5);
+    float c = cos(w), s = sin(w);
+    p.xz = mat2(c, -s, s, c)*p.xz;
+    float ang = atan(p.z, p.x);
+    float angFrac = (ang + 3.14159)/6.28318;
+    if (inner > 0.5) {
+      // emotion gauge: fill fraction = intensity, colored by the emotion
+      float lit = 1.0 - smoothstep(uIntensity - 0.02, uIntensity + 0.02, angFrac);
+      base = uEmoCol*(0.18 + 1.5*lit)*(0.6 + 0.6*uGlow);
+    } else {
+      float wave = sin(ang*22.0 - uTime*9.0*motion)*uLevel + 0.35*sin(ang*7.0 + uTime*2.0*motion)*uGlow;
+      p.xz *= 1.0 + wave*0.055;
+      p.y += wave*0.012;
+      float dash = 0.25 + 0.75*step(0.5, fract(angFrac*14.0 + uTime*0.7*motion + aSeed));
+      base = holo*dash*(0.5 + uLevel*1.6 + uGlow*0.6);
+    }
+    ta = clamp((uReveal - 0.5)/0.5, 0.0, 1.0);
+  } else {
+    p = headWarpFwd(aPos, uJaw, uSpread, uBlink, uBrowL, uBrowR);
+
+    // metabolism: turbulence + curl breath (masked at eyes/mouth), all × motion
+    float eneM = clamp(0.55 + 0.55*uEnergy, 0.6, 1.6); // emotion energy drives the metabolism
+    float amp = (0.0010 + uLevel*0.0042 + uReactW*0.0035)*eneM*(isContour ? 0.38 : 1.0)*motion;
+    vec3 nz = vec3(
+      vnoise(aPos*40.0 + vec3(0.0, uTime*0.9, 0.0)),
+      vnoise(aPos*40.0 + vec3(7.1, uTime*0.8, 3.0)),
+      vnoise(aPos*40.0 + vec3(2.3, 5.9, uTime*0.7))) - 0.5;
+    p += aNrm*(nz.x*amp*2.0) + nz*amp;
+    float featMask = smoothstep(0.018, 0.05, length(aPos - vec3(0.0, -0.072, 0.07)))
+                   * smoothstep(0.02, 0.05, length(vec3(abs(aPos.x), aPos.y, aPos.z) - vec3(0.0345, 0.0, 0.05)));
+    vec3 g1 = hash33(floor(aPos*22.0)) - 0.5;
+    vec3 g2 = hash33(floor(aPos*22.0 + 31.0)) - 0.5;
+    p += cross(g1, g2)*0.008*uBreath*featMask*(1.0 - step(0.5, float(isContour ? 1 : 0)))*motion;
+
+    // flow-life (45% of volume rewoven continuously)
+    float flow = step(0.55, fract(aSeed*13.7))*(1.0 - step(0.94, aSeed))*(isContour ? 0.0 : 1.0);
+    if (flow > 0.5) {
+      float u = fract(uTime*(0.10 + fract(aSeed*7.3)*0.12)*motion*clamp(0.5 + 0.6*uEnergy, 0.55, 1.5) + aSeed*11.0);
+      vec3 tflow = normalize(cross(aNrm, vec3(
+        vnoise(aPos*9.0 + uTime*0.05),
+        vnoise(aPos*9.0 + 4.7),
+        vnoise(aPos*9.0 + 9.1)) - 0.5) + 1e-5);
+      p += tflow*u*0.011 + aNrm*0.0016*sin(u*6.28318);
+      lifeA = smoothstep(0.0, 0.18, u)*(1.0 - smoothstep(0.62, 1.0, u));
+      lifeA = 0.35 + 0.65*lifeA;
+    }
+
+    spark = step(0.978, aSeed);
+    feed = step(0.956, aSeed)*(1.0 - spark);
+    if (spark > 0.5) {
+      float ph = fract(uTime*0.05 + aSeed*17.0);
+      p += vec3(sin(aSeed*231.0 + uTime*0.6)*0.06, ph*0.34 - 0.05, cos(aSeed*117.0 + uTime*0.5)*0.05)*0.85*motion;
+    }
+    if (feed > 0.5) {
+      float ph = fract(uTime*(0.10 + aSeed*0.08)*motion + aSeed*29.0);
+      vec3 src = vec3(sin(aSeed*400.0)*0.10, -0.42, 0.02 + cos(aSeed*300.0)*0.06);
+      vec3 arc = mix(src, aPos, ph);
+      arc.x += sin(ph*6.28318 + aSeed*40.0)*0.03*(1.0 - ph);
+      p = mix(arc, p, smoothstep(0.75, 1.0, ph));
+    }
+
+    // SLEEP: ink dissolve — staggered curl departure, home stays the attractor
+    if (uSleep > 0.003) {
+      float m = clamp(uSleep*1.4 - fract(aSeed*5.1)*0.4, 0.0, 1.0);
+      m = m*m*(3.0 - 2.0*m);
+      vec3 drift = aPos + cross(g1, g2)*0.5 + aNrm*0.12 + vec3(0.0, -0.05, 0.0);
+      p = mix(p, drift, m*0.85);
+      lifeA *= 1.0 - 0.75*m;
+    }
+  }
+
+  // rampancy ghosts: offset + red-shift (drawn as extra passes during alarm)
+  if (uGhost > 0.5 && !isIris) {
+    p += uGhostOff;
+    base *= vec3(1.5, 0.45, 0.45);
+    vFade0 *= 0.30;
+  }
+
+  // glitch bursts (startle/ambient-rare)
+  float gAmt = uReactW*0.9;
+  float gseed = hash11(floor(uTime*1.7));
+  if (gseed > 0.78) gAmt = max(gAmt, (gseed - 0.78)*0.7);
+  if (gAmt > 0.01 && !isRing) {
+    float band = step(abs(fract(p.y*9.0 + hash11(floor(uTime*11.0))*7.0) - 0.5), 0.10*gAmt);
+    p.x += band*(hash11(floor(uTime*13.0) + floor(p.y*40.0)) - 0.5)*0.06*gAmt;
+  }
+
+  // scanlines (not on iris)
+  float slice = 1.0;
+  if (!isIris) {
+    float slPhase = p.y*560.0 - uTime*2.8*motion;
+    slice = 0.72 + 0.36*pow(0.5 + 0.5*sin(slPhase), 1.6);
+    float bandId = floor(slPhase/6.28318);
+    p.x += (hash11(bandId*0.613 + floor(uTime*7.0)*13.7) - 0.5)*0.0009*motion;
+  }
+
+  // SLICE-PLANE MATERIALIZATION (wake/boot): a hot band sweeps the head upward
+  float sweepY = mix(-0.16, 0.15, clamp(uReveal*1.15, 0.0, 1.0));
+  float matBand = exp(-pow((p.y - sweepY)*70.0, 2.0));
+  float matOn = isRing ? 1.0 : smoothstep(sweepY + 0.004, sweepY - 0.004, p.y); // 'active' is GLSL-reserved!
+  if (uReveal < 0.999 && !isRing) {
+    // pre-activation: dim matte lattice above the sweep line
+    vFade0 *= max(matOn, 0.10);
+    if (matOn < 0.5) base = vec3(0.5, 0.55, 0.6)*0.4;
+    p.x += matBand*(hash11(aSeed*777.0 + floor(uTime*30.0)) - 0.5)*0.004; // settle jitter
+  }
+
+  float depthF = 0.50 + 0.50*smoothstep(-0.085, 0.045, p.z);
+  vec3 world = isRing ? (p + uHeadPos*0.4 + vec3(0.0, -0.012, 0.0)) : (uHeadRot*p + uHeadPos);
+
+  // CHROMATIC PLANE SEPARATION: per-particle color channel, misconverging with voice
+  float chan = floor(fract(aSeed*91.7)*3.0); // 0,1,2 -> R,G,B
+  float sep = (0.0028*uLevel + 0.004*uReactW + 0.002*uDoubt + 0.0018*uGestureW)*(isIris ? 0.0 : 1.0);
+  world += (uCamRight*(chan - 1.0) + uCamFwd*(chan - 1.0)*1.6)*sep;
+
+  if (uMirror > 0.5) world.y = -0.36 - world.y;
+  vec4 viewPos = uView*vec4(world, 1.0);
+  gl_Position = uProj*viewPos;
+
+  // ---- color: volume/contour materials ----
+  float isEyeM = 0.0;
+  if (!isIris && !isRing) {
+    if (aMat > 0.5 && aMat < 1.5) { isEyeM = 1.0; base = holo*0.22; }
+    else if (aMat > 1.5 && aMat < 2.5) base = mix(vec3(0.42, 0.62, 1.0), uEmoCol*1.15, uGlow*0.5);
+    else if (aMat > 2.5 && aMat < 3.5) base = holo*0.20;
+    else if (aMat > 3.5 && aMat < 4.5) base = vec3(0.85, 0.95, 1.0)*0.5;
+    else if (aMat > 5.5 && aMat < 6.5) base = holo*vec3(0.28, 0.38, 0.42);
+    else if (aMat > 6.5) base = holo*vec3(0.30, 0.34, 0.40);
+    base = mix(base*vec3(0.55, 0.75, 1.05), base, depthF);
+  }
+  float cs = sin(p.y*150.0 + uTime*0.9);
+  base *= vec3(1.0 - (0.12 + gAmt*0.5)*cs, 1.0, 1.0 + (0.10 + gAmt*0.5)*cs);
+
+  // chromatic channel isolation (sums back to base when converged)
+  if (!isIris) {
+    vec3 mask = chan < 0.5 ? vec3(3.0, 0.0, 0.0) : chan < 1.5 ? vec3(0.0, 3.0, 0.0) : vec3(0.0, 0.0, 3.0);
+    base *= mix(vec3(1.0), mask, 0.60);
+  }
+
+  vec3 nw = uHeadRot*aNrm;
+  float facing = dot(normalize(nw), normalize(uCamPos - world));
+  // FRESNEL HOLLOW GLASS: hot rim, dim glassy front, 30%-visible far side
+  float fres = pow(1.0 - abs(facing), 2.2);
+  float rim = 0.38 + 1.55*fres;
+  float backFade = (isRing || isIris) ? 1.0 : mix(0.30, 1.0, smoothstep(-0.15, 0.10, facing));
+  backFade = mix(backFade, 1.0, max(spark, feed));
+  if (isContour) backFade = smoothstep(0.02, 0.22, facing);
+
+  // DATA-SKIN: code crawling under the front surface, denser while thinking
+  float dataSkin = 0.0;
+  if (!isIris && !isRing && aPos.z > 0.012) {
+    vec2 cell = vec2(floor(aPos.x*46.0), floor(aPos.y*46.0 + uTime*1.15*motion));
+    float code = step(0.60, hash21(cell + floor(uTime*2.0)*0.13));
+    dataSkin = (code - 0.35)*(0.20 + 0.45*clamp(uStormRate - 0.2, 0.0, 1.0));
+  }
+
+  // CORTICAL STORM: epicenter waves of activation; neurons spike white-hot
+  float storm = 0.0, neuronSpike = 0.0;
+  if (!isIris && !isRing) {
+    float period = mix(4.2, 1.15, clamp(uStormRate, 0.0, 1.0));
+    float cyc = floor(uTime/period);
+    vec3 epi = (hash33(vec3(cyc*0.7, cyc*1.3, cyc*0.4)) - 0.5)*vec3(0.11, 0.16, 0.10) + vec3(0.0, 0.015, 0.025);
+    float f = fract(uTime/period)*9.0 - length(aPos - epi)*46.0;
+    float wavefront = exp(-pow(f - 0.4, 2.0)*2.2)*step(0.0, f + 1.0);
+    storm = wavefront*0.55*clamp(uStormRate*1.6, 0.0, 1.0)*motion;
+    float neuron = step(fract(aSeed*57.3), 0.030);
+    neuronSpike = neuron*exp(-max(f, 0.0)*2.0)*step(0.0, f)*clamp(uStormRate*2.0, 0.0, 1.3)*motion;
+  }
+
+  // UNCERTAINTY MOIRÉ: interference bands while doubting/listening
+  float moire = 1.0;
+  if (!isIris) {
+    float m1 = sin(aPos.y*260.0 + aPos.x*90.0 + uTime*1.6);
+    float m2 = sin(aPos.y*243.0 - aPos.x*104.0 - uTime*1.25);
+    moire = 1.0 + uDoubt*0.5*(m1*m2 - 0.2);
+  }
+
+  // SCAN PULSES: outward from mouth (speaking) / converging inward (listening)
+  float pulse = 0.0;
+  if (abs(uPulseDir) > 0.1 && !isRing) {
+    float d = length(aPos - vec3(0.0, -0.060, 0.055));
+    float w = fract(d*3.2 - uPulseDir*uTime*1.35);
+    pulse = exp(-pow(w*11.0, 2.0)) + 0.3*exp(-pow(fract(w*2.0)*9.0, 2.0));
+    pulse *= (uPulseDir > 0.0 ? (0.35 + 0.85*uLevel) : 0.5)*motion;
+  }
+
+  float ripple = isIris ? 0.0 : sin(length(aPos - vec3(0.0, -0.072, 0.070))*160.0 - uTime*11.0)*exp(-length(aPos - vec3(0.0, -0.072, 0.070))*9.0)*uLevel;
+  // emotion-change shockwave: expanding recolor band from the head core
+  float emoBand = 0.0;
+  if (uEmoPulse > 0.01 && !isRing) {
+    float dC = length(aPos - vec3(0.0, -0.01, 0.02));
+    float front = (1.0 - uEmoPulse)*0.24;
+    emoBand = exp(-pow((dC - front)*42.0, 2.0))*uEmoPulse;
+    base = mix(base, uEmoCol*1.7, emoBand*0.85);
+  }
+  float sweep = exp(-pow((p.y - (fract(uTime*0.13)*0.9 - 0.5))*22.0, 2.0));
+  float tw = 0.75 + (0.30 + 0.45*clamp(uEnergy, 0.3, 1.7))*hash11(aSeed*997.0 + floor(uTime*(5.0 + 3.0*uEnergy) + aSeed*20.0));
+  float breathAmp = 0.92 + 0.08*uBreath;
+
+  // LiDAR honesty: grazing dropout + range jitter (volume only, thin)
+  float lidar = 1.0;
+  if (!isIris && !isRing && !isContour) {
+    float graze = 1.0 - abs(facing);
+    lidar = 1.0 - 0.55*step(hash21(vec2(aSeed*513.0, floor(uTime*16.0))), 0.03 + 0.14*graze*graze*graze);
+  }
+
+  float amp2 = rim*tw*slice*moire*(1.0 + sweep*0.9 + ripple*1.8 + storm + pulse*1.6 + dataSkin)
+             * (0.80 + uLevel*0.42 + uGlow*0.28 + uGestureW*0.22 + emoBand*2.0)*breathAmp*depthF;
+  if (isContour) amp2 = tw*moire*(1.8 + sweep*0.8 + ripple*2.2 + storm*1.4 + pulse*1.8 + emoBand*2.2)*(0.9 + uLevel*0.4 + uGlow*0.28 + uGestureW*0.25)*depthF;
+  if (isIris) amp2 = 1.6 + uLevel*0.3 + uGlow*0.2;
+  if (isRing) amp2 = 1.0;
+  amp2 += matBand*2.4*(uReveal < 0.999 ? 1.0 : 0.0);
+
+  vec3 col = base*amp2 + vec3(1.0, 1.0, 1.05)*neuronSpike*2.2;
+  // pause-freeze: desaturate + dim flicker
+  float lum = dot(col, vec3(0.3, 0.5, 0.2));
+  col = mix(col, vec3(lum), 0.30*uFreeze);
+  col *= 1.0 - 0.25*uFreeze*step(0.5, fract(uTime*2.2));
+  vColor = col;
+
+  float mouthGate = smoothstep(0.10, 0.40, uJaw);
+  if (!isIris && !isRing && aMat > 2.5 && aMat < 4.5) vFade0 *= mouthGate;
+  float mirrorFade = uMirror > 0.5 ? 0.15 : 1.0;
+  vFade = vFade0*lifeA*ta*(spark > 0.5 ? 0.45 : 1.0)*(feed > 0.5 ? 0.6 : 1.0)*backFade*mirrorFade*lidar;
+
+  float sz = isRing ? 0.0009 : isIris ? 0.00085 : isContour ? 0.0011 : (spark > 0.5 ? 0.0012 : 0.0016)*(0.8 + 0.6*aSeed);
+  sz *= 1.0 + neuronSpike*1.6;
+  gl_PointSize = clamp(sz*uPixelScale/max(-viewPos.z, 0.05), 1.0, 9.0);
+}
+`;
+
+const PT_FS = `#version 300 es
+precision highp float;
+in vec3 vColor;
+in float vFade;
+flat in float vType;
+out vec4 outColor;
+void main(){
+  vec2 d = gl_PointCoord*2.0 - 1.0;
+  float r2 = dot(d, d);
+  if (r2 > 1.0) discard;
+  float a = vType > 0.5 ? exp(-r2*4.6) : exp(-r2*3.2);
+  outColor = vec4(vColor*a*vFade*0.14, 1.0);
+}
+`;
+
+export class Wisp4Face {
+  static title = 'WISP IV';
+  static tech = 'SIGNAL BEING';
+  static CAM = { dist: 0.62, targetY: -0.012 };
+  static blurb =
+    'A presence whose inner state is visible in its own light. Thought storms sweep the ' +
+    'cortex when it thinks, interference bands ripple when it doubts, its color channels ' +
+    'split apart as it speaks, scan pulses radiate from the mouth — or converge inward ' +
+    'when it listens. Approach it with your pointer and the cloud flinches. Interrupt it ' +
+    'and it freezes mid-thought. It wakes by materializing in slices and sleeps by ' +
+    'dissolving into ink.';
+
+  constructor(gl, assets) {
+    this.gl = gl;
+    this._col = [0.20, 0.80, 1.00];
+    this._sleep = 0;
+    this._lastEmo = 'neutral';
+    this._emoPulse = 0;
+
+    const bg = program(gl, HOLO_BG_VS, HOLO_BG_FS, 'wisp4.bg');
+    this.bgProg = bg.prog; this.bgU = bg.u;
+    this.quadVao = fullscreenVAO(gl);
+    const pt = program(gl, PT_VS, PT_FS, 'wisp4.pt');
+    this.ptProg = pt.prog; this.ptU = pt.u;
+    const decay = program(gl, QUAD_VS, DECAY_FS, 'wisp4.decay');
+    this.decayProg = decay.prog; this.decayU = decay.u;
+    const comp = program(gl, QUAD_VS, COMP_FS, 'wisp4.comp');
+    this.compProg = comp.prog; this.compU = comp.u;
+
+    this._fbo = [null, null]; this._tex = [null, null];
+    this._fw = 0; this._fh = 0; this._flip = 0;
+
+    // particle sets (WISP III recipe: weighted volume + culled contours + rings + iris)
+    const sstep = (a, b, v) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
+    const weightFn = (x, y, z, mat) => {
+      let w = 1;
+      w *= 0.45 + 0.55 * sstep(-0.075, 0.045, z);
+      w *= 1 + 1.1 * sstep(-0.02, 0.06, z);
+      if (mat === 1) w *= 0.7;
+      else if (mat === 2) w *= 2.4;
+      else if (mat === 7) w *= 3;
+      else if (mat === 4 || mat === 3) w *= 1.2;
+      const ng = Math.exp(-((x / 0.030) ** 2 + ((y + 0.018) / 0.048) ** 2)) * sstep(0.045, 0.065, z);
+      w *= 1 + 1.7 * ng;
+      const ex = Math.abs(x) - 0.0345;
+      const eg = Math.exp(-(ex * ex + y * y) / 0.0009) * sstep(0.02, 0.045, z);
+      w *= 1 + 0.7 * eg;
+      return w;
+    };
+    const vol = sampleSurfaceWeighted(assets.mesh, 92000, weightFn, mulberry32(4044));
+    const conRaw = extractFeatureEdges(assets.mesh, { angleDeg: 13, spacing: 0.0016, maxPoints: 15000, minZ: -0.01 });
+    const keep = [];
+    for (let i = 0; i < conRaw.count; i++) {
+      const x = conRaw.positions[i * 3], y = conRaw.positions[i * 3 + 1], z = conRaw.positions[i * 3 + 2];
+      if (!(Math.abs(x) < 0.034 && Math.abs(y + 0.072) < 0.024 && z < 0.0685)) keep.push(i);
+    }
+    const con = {
+      count: keep.length,
+      positions: new Float32Array(keep.length * 3), normals: new Float32Array(keep.length * 3),
+      mats: new Float32Array(keep.length), seeds: new Float32Array(keep.length),
+    };
+    keep.forEach((src, dst) => {
+      for (let k = 0; k < 3; k++) {
+        con.positions[dst * 3 + k] = conRaw.positions[src * 3 + k];
+        con.normals[dst * 3 + k] = conRaw.normals[src * 3 + k];
+      }
+      con.mats[dst] = conRaw.mats[src];
+      con.seeds[dst] = conRaw.seeds[src];
+    });
+
+    const ringN = 3600;
+    const rp = new Float32Array(ringN * 3), rn = new Float32Array(ringN * 3), rm = new Float32Array(ringN), rs = new Float32Array(ringN);
+    const rr = mulberry32(7);
+    for (let i = 0; i < ringN; i++) {
+      const inner = i < ringN * 0.5;
+      const a = rr() * Math.PI * 2;
+      const rad = inner ? 0.185 : 0.215;
+      const lvl = inner ? 0.005 : -0.085;
+      const tilt = inner ? 0.10 : -0.06;
+      rp[i * 3] = Math.cos(a) * rad;
+      rp[i * 3 + 1] = lvl + Math.sin(a) * rad * tilt + (rr() - 0.5) * 0.0015;
+      rp[i * 3 + 2] = Math.sin(a) * rad;
+      rn[i * 3 + 1] = 1;
+      rs[i] = inner ? rr() * 0.49 : 0.5 + rr() * 0.5; // seed band = ring id
+    }
+
+    const irisPerEye = 1300, irisN = irisPerEye * 2;
+    const ip = new Float32Array(irisN * 3), inr = new Float32Array(irisN * 3), im = new Float32Array(irisN), isd = new Float32Array(irisN);
+    const ir = mulberry32(41);
+    for (let e = 0; e < 2; e++) {
+      const side = e === 0 ? -1 : 1;
+      for (let i = 0; i < irisPerEye; i++) {
+        const ix = e * irisPerEye + i;
+        ip[ix * 3] = Math.sqrt(ir()) * 0.0050;
+        ip[ix * 3 + 1] = ir() * Math.PI * 2;
+        ip[ix * 3 + 2] = side;
+        inr[ix * 3 + 2] = 1;
+        im[ix] = 1;
+        isd[ix] = ir();
+      }
+    }
+
+    const cat = (arrs) => {
+      const total = arrs.reduce((n, a) => n + a.length, 0);
+      const out = new Float32Array(total);
+      let o = 0;
+      for (const a of arrs) { out.set(a, o); o += a.length; }
+      return out;
+    };
+    const positions = cat([vol.positions, con.positions, rp, ip]);
+    const normals = cat([vol.normals, con.normals, rn, inr]);
+    const mats = cat([vol.mats, con.mats, rm, im]);
+    const seeds = cat([vol.seeds, con.seeds, rs, isd]);
+    const types = new Float32Array(positions.length / 3);
+    let off = 0;
+    for (const [arr, ty] of [[vol, 0], [con, 1], [{ count: ringN }, 2], [{ count: irisN }, 3]]) {
+      types.fill(ty, off, off + arr.count);
+      off += arr.count;
+    }
+    this.count = positions.length / 3;
+
+    this.vao = gl.createVertexArray();
+    gl.bindVertexArray(this.vao);
+    const attach = (loc, data, size) => {
+      const b = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, b);
+      gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+      gl.enableVertexAttribArray(loc);
+      gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
+    };
+    attach(0, positions, 3);
+    attach(1, normals, 3);
+    attach(2, mats, 1);
+    attach(3, seeds, 1);
+    attach(4, types, 1);
+    gl.bindVertexArray(null);
+  }
+
+  _ensureTrails(w, h) {
+    const gl = this.gl;
+    const fw = Math.max(2, w >> 1), fh = Math.max(2, h >> 1);
+    if (fw === this._fw && fh === this._fh) return;
+    this._fw = fw; this._fh = fh;
+    for (let i = 0; i < 2; i++) {
+      if (this._tex[i]) { gl.deleteTexture(this._tex[i]); gl.deleteFramebuffer(this._fbo[i]); }
+      const tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, fw, fh, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      const fbo = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+      gl.clearColor(0, 0, 0, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      this._tex[i] = tex; this._fbo[i] = fbo;
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  draw(cm) {
+    const gl = this.gl;
+    const s = cm.s;
+    const target = EMO_COL[s.emotion] || EMO_COL.neutral;
+    const k = 1 - Math.exp(-2.5 * cm.dt);
+    for (let i = 0; i < 3; i++) this._col[i] += (target[i] - this._col[i]) * k;
+    // emotion switch -> recolor shockwave
+    if (s.emotion !== this._lastEmo) { this._lastEmo = s.emotion; this._emoPulse = 1; }
+    this._emoPulse = Math.max(0, this._emoPulse - cm.dt * 1.4);
+
+    // signal-being state uniforms (all derived from the driver)
+    const sleepT = s.state === 'sleeping' ? 1 : 0;
+    this._sleep += (sleepT - this._sleep) * (1 - Math.exp(-1.6 * cm.dt));
+    const stormRate = s.state === 'thinking' ? 1.0 : s.state === 'listening' ? 0.32 : s.state === 'alert' ? 0.85 : 0.16 + (s.glow || 0) * 0.2;
+    const pulseDir = s.level > 0.06 && s.state !== 'listening' ? 1 : s.state === 'listening' ? -1 : 0;
+    this._ensureTrails(cm.width, cm.height);
+    const cur = this._flip, prev = 1 - this._flip;
+    this._flip = prev;
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this._fbo[cur]);
+    gl.viewport(0, 0, this._fw, this._fh);
+    gl.disable(gl.DEPTH_TEST);
+    gl.disable(gl.BLEND);
+    gl.useProgram(this.decayProg);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this._tex[prev]);
+    gl.uniform1i(this.decayU.uPrev, 0);
+    gl.uniform1f(this.decayU.uDecay, 0.78);
+    gl.bindVertexArray(this.quadVao);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE);
+    gl.useProgram(this.ptProg);
+    const u = this.ptU;
+    gl.uniformMatrix4fv(u.uProj, false, cm.proj);
+    gl.uniformMatrix4fv(u.uView, false, cm.view);
+    gl.uniformMatrix3fv(u.uHeadRot, false, cm.headRot);
+    gl.uniform3fv(u.uHeadPos, cm.headPos);
+    gl.uniform3fv(u.uCamPos, cm.camPos);
+    gl.uniform3fv(u.uCamRight, cm.camRight);
+    gl.uniform3fv(u.uCamFwd, cm.camFwd);
+    gl.uniform1f(u.uTime, cm.t);
+    gl.uniform1f(u.uReveal, cm.reveal);
+    gl.uniform1f(u.uPixelScale, this._fh / (2 * cm.tanHalf));
+    gl.uniform1f(u.uJaw, s.jaw);
+    gl.uniform1f(u.uSpread, s.spread);
+    gl.uniform1f(u.uBlink, s.blink);
+    gl.uniform1f(u.uBrowL, s.browL);
+    gl.uniform1f(u.uBrowR, s.browR);
+    gl.uniform1f(u.uLevel, s.level);
+    gl.uniform1f(u.uGlow, s.glow || 0);
+    gl.uniform1f(u.uReactW, s.reactW || 0);
+    gl.uniform1f(u.uBreath, s.breath || 0.5);
+    gl.uniform1f(u.uDoubt, s.doubt || 0);
+    gl.uniform1f(u.uFreeze, s.freeze || 0);
+    gl.uniform1f(u.uSleep, this._sleep);
+    gl.uniform1f(u.uStormRate, stormRate);
+    gl.uniform1f(u.uPulseDir, pulseDir);
+    gl.uniform1f(u.uIntensity, s.intensity ?? 1);
+    gl.uniform1f(u.uEnergy, s.energy ?? 1);
+    gl.uniform1f(u.uGestureW, s.gestureW || 0);
+    gl.uniform1f(u.uEmoPulse, this._emoPulse);
+    if (u.uPupil) gl.uniform1f(u.uPupil, s.pupil || 1);
+    gl.uniform3fv(u.uGazeDir, cm.gazeDir);
+    gl.uniform3fv(u.uEmoCol, this._col);
+    gl.bindVertexArray(this.vao);
+    gl.uniform1f(u.uGhost, 0);
+    gl.uniform3f(u.uGhostOff, 0, 0, 0);
+    gl.uniform1f(u.uMirror, 1);
+    gl.drawArrays(gl.POINTS, 0, this.count);
+    gl.uniform1f(u.uMirror, 0);
+    gl.drawArrays(gl.POINTS, 0, this.count);
+    // rampancy: transient ghost duplicates during hard startle / alarm
+    const rw = s.reactW || 0;
+    if (rw > 0.5 || s.state === 'alert') {
+      const g = Math.max(rw, 0.6);
+      gl.uniform1f(u.uGhost, 1);
+      const j = Math.sin(cm.t * 23.7);
+      gl.uniform3f(u.uGhostOff, 0.018 * g * j, 0.006 * g, -0.01 * g * j);
+      gl.drawArrays(gl.POINTS, 0, this.count);
+      gl.uniform3f(u.uGhostOff, -0.016 * g * j, -0.004 * g, 0.012 * g * j);
+      gl.drawArrays(gl.POINTS, 0, this.count);
+      gl.uniform1f(u.uGhost, 0);
+    }
+    gl.bindVertexArray(null);
+    gl.disable(gl.BLEND);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, cm.width, cm.height);
+    gl.useProgram(this.bgProg);
+    gl.uniform2f(this.bgU.uRes, cm.width, cm.height);
+    gl.uniform1f(this.bgU.uTime, cm.t);
+    gl.uniform1f(this.bgU.uLevel, s.level);
+    gl.uniform1f(this.bgU.uGlow, s.glow || 0);
+    gl.uniform3fv(this.bgU.uEmoCol, this._col);
+    if (this.bgU.uScene) gl.uniform1f(this.bgU.uScene, (cm.scene && cm.scene.bg) || 0);
+    gl.bindVertexArray(this.quadVao);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE);
+    gl.useProgram(this.compProg);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this._tex[cur]);
+    gl.uniform1i(this.compU.uTex, 0);
+    gl.uniform1f(this.compU.uGain, 0.82);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindVertexArray(null);
+    gl.disable(gl.BLEND);
+  }
+}

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FABLEFACE — one synthetic head, three renderers</title>
+<meta name="description" content="A live comparison of three real-time techniques for rendering a talking AI presence: SDF raymarching, a particle hologram, and a surface-net mesh.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%2343d6ff' stroke-width='2'/%3E%3Ccircle cx='11' cy='14' r='2' fill='%2343d6ff'/%3E%3Ccircle cx='21' cy='14' r='2' fill='%2343d6ff'/%3E%3Cpath d='M11 21q5 4 10 0' stroke='%2343d6ff' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body data-face="wisp7">
+<canvas id="stage"></canvas>
+<div class="scanlines" aria-hidden="true"></div>
+
+<header id="topbar">
+  <div class="brand">
+    <div class="brand-name">FABLE<span>FACE</span></div>
+    <div class="brand-sub">synthetic presence · rendering lab</div>
+  </div>
+  <nav id="tabs" aria-label="Renderer"></nav>
+  <div class="status">
+    <span id="voice-mode">VOICE: —</span>
+    <span id="fps">— FPS</span>
+  </div>
+</header>
+
+<aside id="panel">
+  <div class="corner tl"></div><div class="corner tr"></div>
+  <div class="corner bl"></div><div class="corner br"></div>
+  <div class="panel-kicker">ACTIVE RENDERER</div>
+  <h1 id="panel-title">—</h1>
+  <div id="panel-tech" class="panel-tech">—</div>
+  <p id="panel-blurb"></p>
+  <div id="panel-stats" class="panel-stats"></div>
+  <div class="panel-hint">keys 1 / 2 / 3 switch · move the pointer — the eyes follow</div>
+</aside>
+
+<footer id="console">
+  <div class="chip-group"><span class="chip-label">SCENE</span><div id="scenes" class="chip-row" aria-label="Scene"></div></div>
+  <div class="chip-group"><span class="chip-label">STATE · <b id="state-live">IDLE</b></span><div id="states" class="chip-row" aria-label="State"></div></div>
+  <div class="chip-group"><span class="chip-label">EMOTION</span><div id="emotions" class="chip-row" aria-label="Emotion"></div></div>
+  <div class="chip-group"><span class="chip-label">GESTURE</span><div id="gestures" class="chip-row" aria-label="Gesture"></div></div>
+  <div class="say-row">
+    <span class="prompt">&gt;</span>
+    <input id="say" type="text" autocomplete="off" spellcheck="false"
+           placeholder="type something… tags work: [joy] great news! [nod] yes.">
+    <button id="speak">SPEAK</button>
+  </div>
+  <div id="presets" class="chip-row" aria-label="Presets"></div>
+</footer>
+
+<aside id="sim-panel">
+  <div class="sim-head">
+    <span class="sim-title">OPERATOR LINK</span>
+    <button id="sim-btn">▶ RUN SIMULATION</button>
+  </div>
+  <div id="sim-feed"></div>
+</aside>
+
+<div id="loading">INITIALIZING…</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

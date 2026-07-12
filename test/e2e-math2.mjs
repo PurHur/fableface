@@ -1,0 +1,16 @@
+import { chromium } from 'playwright';
+const browser = await chromium.launch({ args: ['--use-gl=angle', '--enable-webgl', '--ignore-gpu-blocklist'] });
+const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+const errors = [];
+page.on('pageerror', (e) => errors.push(String(e)));
+await page.goto('http://localhost:8799/?sim=0', { waitUntil: 'networkidle' });
+await page.waitForFunction(() => window.__fableface && window.__fableface.api, { timeout: 20000 });
+await page.waitForTimeout(8000);
+await page.screenshot({ path: 'test/shot-math-idle.png' });
+await page.evaluate(() => window.__fableface.api.say('The face is the resonating instrument of its own voice, watch the standing waves ripple across the surface as I speak these words aloud to you now.'));
+await page.waitForTimeout(4500);
+await page.screenshot({ path: 'test/shot-math-chladni.png' });
+console.log('errors:', JSON.stringify(errors));
+await browser.close();
+if (errors.length) process.exit(1);
+console.log('PASS');
