@@ -550,9 +550,16 @@ void main(){
   float isEyeM = 0.0;
   if (!isIris && !isRing && !isConduit) {
     if (isCore) {
-      // the mind: warm-white luminous mass, breathing, emotion-washed
-      base = mix(vec3(0.75, 0.9, 1.0), uEmoCol*1.35, clamp(uGlow*1.2, 0.0, 0.85));
-      base *= 0.5 + 0.22*uBreath + 0.35*clamp(uStormRate, 0.0, 1.2);
+      // THE MIND — a luminous neural mass, not a flat blob: dendritic filament
+      // web + synaptic packets racing through it; brightens & fires harder while
+      // thinking. neuronSpike (below) still adds the white synapse flashes.
+      float think = clamp(uStormRate, 0.0, 1.3);
+      float web = vnoise(aPos*74.0 + vec3(0.0, uTime*0.25*motion, 0.0));
+      float fila = smoothstep(0.50, 0.82, web);                       // bright dendrite ridges
+      float axon = pow(0.5 + 0.5*sin(aPos.y*70.0 + aPos.x*40.0 - uTime*(3.5 + 3.0*think)*motion + aSeed*30.0), 8.0);
+      base = mix(vec3(0.72, 0.88, 1.0), uEmoCol*1.4, clamp(uGlow*1.2, 0.0, 0.85));
+      base *= 0.30 + 0.42*fila + 0.14*uBreath + 0.22*think;           // structured, ~orig brightness
+      base += mix(vec3(0.70, 0.90, 1.0), uEmoCol, 0.5)*axon*(0.22 + 0.5*think); // sparse traveling pulses
     } else if (isCircuit) {
       // machinery: dim teal lattice with circuit-trace lines + data pulses
       vec3 q = aPos*90.0;
@@ -594,9 +601,16 @@ void main(){
   // warm rim from behind-opposite: the teal-orange accent that pulls the head forward
   float warmRim = pow(max(0.0, dot(normalize(aNrm), normalize(vec3(0.55, 0.15, -0.72)))), 3.0)*fres;
   if (!inner && !isIris && !isRing) base += vec3(1.0, 0.52, 0.18)*warmRim*uWarmRimK;
-  // QUIET NOSE: dim the nose region for skin + contour particles
+  // NOSE — defined, not merely dimmed: a key-lit central bridge/tip ridge with
+  // softer flanks and a hint of nostril shadow, so it reads as a real nose.
   float noseM = exp(-(pow(aPos.x/0.026, 2.0) + pow((aPos.y + 0.022)/0.05, 2.0)))*smoothstep(0.05, 0.07, aPos.z);
-  if (!inner && !isIris && !isRing) rim *= 1.0 - 0.42*noseM;
+  float noseBridge = exp(-pow(aPos.x/0.0105, 2.0))*noseM;                                  // thin central ridge
+  float nostril = exp(-(pow((abs(aPos.x) - 0.010)/0.0058, 2.0) + pow((aPos.y + 0.047)/0.010, 2.0)))*smoothstep(0.072, 0.083, aPos.z);
+  if (!inner && !isIris && !isRing) {
+    rim *= 1.0 - 0.34*noseM*(1.0 - noseBridge);        // dim only the flanks
+    rim *= 1.0 + 0.55*noseBridge*(0.35 + 0.65*keyFace); // the bridge catches the portrait key
+    rim *= 1.0 - 0.45*nostril;                          // nostril hollows read as shadow
+  }
   // thin-film whisper at grazing angles (skin only)
   if (!inner && !isIris && !isRing && !isContour) base = mix(base, base.gbr, 0.10*fres);
   // SKIN is glassier than IV: interior must read through it
@@ -676,6 +690,16 @@ void main(){
 
   // SKIN transparency: dial the outer layer down so the mind shows through
   if (!inner && !isIris && !isRing && !isContour) amp2 *= uSkinA;
+
+  // EXPRESSION: features light up as they animate — a smile brightens the mouth,
+  // a raised/furrowed brow lights the ridge. The cloud reads more alive & human.
+  if (!inner && !isIris && !isRing) {
+    float smileM = exp(-(pow(aPos.x/0.032, 2.0) + pow((aPos.y + 0.070)/0.022, 2.0)))*smoothstep(0.03, 0.06, aPos.z);
+    float browM = exp(-(pow((abs(aPos.x) - 0.028)/0.024, 2.0) + pow((aPos.y - 0.030)/0.014, 2.0)))*smoothstep(0.03, 0.06, aPos.z);
+    float browExpr = (aPos.x < 0.0) ? uBrowL : uBrowR;
+    amp2 *= 1.0 + 0.55*smileM*clamp(uSpread, 0.0, 1.0) + 0.30*smileM*clamp(-uSpread, 0.0, 1.0)
+              + 0.55*browM*clamp(abs(browExpr), 0.0, 1.0);
+  }
 
   vec3 col = base*amp2 + vec3(1.0, 1.0, 1.05)*neuronSpike*2.2;
   float lum = dot(col, vec3(0.3, 0.5, 0.2));
@@ -880,7 +904,7 @@ export class Wisp8Face {
       else if (mat === 7) w *= 3;
       else if (mat === 4 || mat === 3) w *= 1.2;
       const ng = Math.exp(-((x / 0.030) ** 2 + ((y + 0.018) / 0.048) ** 2)) * sstep(0.045, 0.065, z);
-      w *= 1 + 0.55 * ng; // VII: quiet nose — emphasis belongs to eyes + mouth
+      w *= 1 + 0.9 * ng; // VIII: a defined nose (bridge is lit in-shader), still eyes+mouth first
       const ex = Math.abs(x) - 0.0345;
       const eg = Math.exp(-(ex * ex + y * y) / 0.0009) * sstep(0.02, 0.045, z);
       w *= 1 + 0.7 * eg;

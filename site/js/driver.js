@@ -235,8 +235,18 @@ export class PresenceDriver {
       if (r.w < 0.02) { this._reactions.splice(i, 1); continue; }
       for (const k in target) target[k] = lerp(target[k], r.vec[k], r.w);
     }
-    const ov = STATE_OVERLAY[this.state];
-    if (ov) for (const k in ov.vec) target[k] = lerp(target[k], ov.vec[k], ov.w);
+    // state overlay, CROSS-FADED: entering/leaving a state (or flipping between
+    // states in a fast agent loop) ramps the overlay in/out instead of snapping,
+    // so the pose is smooth at every instant — no pop on any transition.
+    const ovT = STATE_OVERLAY[this.state] || { vec: {}, w: 0 };
+    if (!this._ovVec) { this._ovVec = {}; this._ovW = 0; }
+    for (const k in ovT.vec) if (!(k in this._ovVec)) this._ovVec[k] = (k in EMO_BASE) ? EMO_BASE[k] : 0;
+    this._ovW = smooth(this._ovW, ovT.w, 4.5, dt);
+    for (const k in this._ovVec) {
+      const tv = (k in ovT.vec) ? ovT.vec[k] : ((k in EMO_BASE) ? EMO_BASE[k] : 0);
+      this._ovVec[k] = smooth(this._ovVec[k], tv, 4.5, dt);
+      if (k in target) target[k] = lerp(target[k], this._ovVec[k], this._ovW);
+    }
     for (const k in this._emo) this._emo[k] = smooth(this._emo[k], target[k], 3.5, dt);
     const emo = this._emo;
 

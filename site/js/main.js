@@ -406,6 +406,11 @@ async function boot() {
   resize();
 
   const FOV_DEFAULT = 33;
+  // hoisted per-frame scratch: the render loop reuses these every frame so it
+  // allocates nothing steady-state — no GC hitches, motion stays smooth E2E.
+  const _headPos = new Float32Array(3), _camPos = new Float32Array(3), _gazeDir = new Float32Array(3);
+  const _camRight = new Float32Array(3), _camUp = new Float32Array(3), _camFwd = new Float32Array(3);
+  const _target = new Float32Array(3), _worldUp = new Float32Array([0, 1, 0]);
   let last = performance.now();
   let fpsAcc = 0, fpsN = 0, fpsShown = 0;
 
@@ -422,48 +427,42 @@ async function boot() {
     const headRot4 = mat4Multiply(mat4RotateY(s.yaw), mat4Multiply(mat4RotateX(s.pitch), mat4RotateZ(s.roll)));
     const headRot = mat3FromMat4(headRot4);
     const invHeadRot = mat3Transpose(headRot);
-    const headPos = new Float32Array([
-      Math.sin(t * 0.14) * 0.0025,
-      -0.018 + s.breath * 0.004,
-      0,
-    ]);
+    _headPos[0] = Math.sin(t * 0.14) * 0.0025;
+    _headPos[1] = -0.018 + s.breath * 0.004;
+    _headPos[2] = 0;
 
     const camCfg = faces[active].constructor.CAM || { dist: 0.66, targetY: -0.045 };
     const FOV = (camCfg.fov || FOV_DEFAULT) * Math.PI / 180; // long-lens faces compress like an 85mm portrait
-    const camPos = new Float32Array([
-      Math.sin(t * 0.11) * 0.010,
-      camCfg.targetY + 0.009 + Math.sin(t * 0.083) * 0.006,
-      camCfg.dist,
-    ]);
-    const target = [0, camCfg.targetY, 0];
-    const view = mat4LookAt(camPos, target, [0, 1, 0]);
+    _camPos[0] = Math.sin(t * 0.11) * 0.010;
+    _camPos[1] = camCfg.targetY + 0.009 + Math.sin(t * 0.083) * 0.006;
+    _camPos[2] = camCfg.dist;
+    _target[0] = 0; _target[1] = camCfg.targetY; _target[2] = 0;
+    const view = mat4LookAt(_camPos, _target, _worldUp);
     const aspect = canvas.width / canvas.height;
     const proj = mat4Perspective(FOV, aspect, 0.05, 5);
 
-    // camera basis for the raymarcher
-    const fwd = [target[0] - camPos[0], target[1] - camPos[1], target[2] - camPos[2]];
-    const fl = Math.hypot(...fwd);
-    fwd[0] /= fl; fwd[1] /= fl; fwd[2] /= fl;
-    const right = [-fwd[2], 0, fwd[0]]; // cross(fwd, up) for up=(0,1,0)
-    const rl = Math.hypot(...right);
-    right[0] /= rl; right[1] /= rl; right[2] /= rl;
-    const up = [
-      right[1] * fwd[2] - right[2] * fwd[1],
-      right[2] * fwd[0] - right[0] * fwd[2],
-      right[0] * fwd[1] - right[1] * fwd[0],
-    ];
+    // camera basis for the raymarcher (written into hoisted buffers)
+    _camFwd[0] = _target[0] - _camPos[0]; _camFwd[1] = _target[1] - _camPos[1]; _camFwd[2] = _target[2] - _camPos[2];
+    const fl = Math.hypot(_camFwd[0], _camFwd[1], _camFwd[2]);
+    _camFwd[0] /= fl; _camFwd[1] /= fl; _camFwd[2] /= fl;
+    _camRight[0] = -_camFwd[2]; _camRight[1] = 0; _camRight[2] = _camFwd[0]; // cross(fwd, up), up=(0,1,0)
+    const rl = Math.hypot(_camRight[0], _camRight[1], _camRight[2]);
+    _camRight[0] /= rl; _camRight[1] /= rl; _camRight[2] /= rl;
+    _camUp[0] = _camRight[1] * _camFwd[2] - _camRight[2] * _camFwd[1];
+    _camUp[1] = _camRight[2] * _camFwd[0] - _camRight[0] * _camFwd[2];
+    _camUp[2] = _camRight[0] * _camFwd[1] - _camRight[1] * _camFwd[0];
 
     const gx = s.gazeX, gy = s.gazeY;
-    const gazeDir = new Float32Array([Math.sin(gx), Math.sin(gy), Math.cos(gx) * Math.cos(gy)]);
+    _gazeDir[0] = Math.sin(gx); _gazeDir[1] = Math.sin(gy); _gazeDir[2] = Math.cos(gx) * Math.cos(gy);
 
     const cm = {
       width: canvas.width, height: canvas.height, aspect,
       t, dt, s, reveal: revealT,
       proj, view,
-      camPos, camRight: new Float32Array(right), camUp: new Float32Array(up), camFwd: new Float32Array(fwd),
+      camPos: _camPos, camRight: _camRight, camUp: _camUp, camFwd: _camFwd,
       tanHalf: Math.tan(FOV / 2),
-      headRot, invHeadRot, headPos,
-      gazeDir,
+      headRot, invHeadRot, headPos: _headPos,
+      gazeDir: _gazeDir,
       scene: SCENES[sceneIx],
     };
 
