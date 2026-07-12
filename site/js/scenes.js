@@ -15,17 +15,12 @@
 
 import { GLSL_COMMON, glslHeader } from './headsdf.js';
 
+// Reduced to the chamber family. CHAMBER II is the premium default arena — a
+// soft luminous stage (no hard grid) with an orrery of orbital motes around the
+// head (WISP VIII fx 10). CHAMBER is the original holo-room, kept for contrast.
 export const SCENES = [
+  { key: 'chamber2', name: 'CHAMBER II', bg: 10, fx: 10, tint: [1, 1, 1], grade: { sat: 1.06, con: 1.07, exp: 0.95, lift: [0, 0.011, 0.02] } },
   { key: 'chamber', name: 'CHAMBER', bg: 0, fx: 0, tint: [1, 1, 1], grade: { sat: 1.06, con: 1.07, exp: 0.92, lift: [0, 0.012, 0.022] } },
-  { key: 'deepspace', name: 'DEEP SPACE', bg: 1, fx: 1, tint: [0.85, 0.95, 1.15], grade: { sat: 1.12, con: 1.12, exp: 1.0, lift: [0, 0.004, 0.03] } },
-  { key: 'raincity', name: 'RAIN CITY', bg: 2, fx: 2, tint: [1.05, 0.75, 1.15], grade: { sat: 1.22, con: 1.12, exp: 0.96, lift: [0.02, 0, 0.04] } },
-  { key: 'vault', name: 'VAULT', bg: 3, fx: 3, tint: [0.8, 1.05, 1.05], grade: { sat: 0.9, con: 1.1, exp: 1.0, lift: [0, 0.015, 0.02] } },
-  { key: 'reactor', name: 'REACTOR', bg: 4, fx: 4, tint: [1.25, 0.72, 0.45], grade: { sat: 1.16, con: 1.16, exp: 0.98, lift: [0.04, 0.006, 0] } },
-  { key: 'abyss', name: 'ABYSS', bg: 5, fx: 5, tint: [0.55, 1.05, 1.0], grade: { sat: 1.06, con: 1.06, exp: 0.95, lift: [0, 0.022, 0.032] } },
-  { key: 'temple', name: 'TEMPLE', bg: 6, fx: 6, tint: [1.2, 1.0, 0.62], grade: { sat: 1.12, con: 1.05, exp: 1.0, lift: [0.038, 0.02, 0] } },
-  { key: 'code', name: 'CODE', bg: 7, fx: 7, tint: [0.45, 1.25, 0.55], grade: { sat: 1.16, con: 1.22, exp: 0.96, lift: [0, 0.03, 0.006] } },
-  { key: 'sweep', name: 'SWEEP', bg: 8, fx: 8, tint: [0.9, 1.05, 1.1], grade: { sat: 0.86, con: 1.12, exp: 0.95, lift: [0.006, 0.012, 0.022] } },
-  { key: 'aurora', name: 'AURORA', bg: 9, fx: 9, tint: [0.8, 1.1, 0.95], grade: { sat: 1.16, con: 1.07, exp: 1.0, lift: [0.008, 0.022, 0.028] } },
 ];
 
 export const SCENE_BG_VS = `#version 300 es
@@ -93,6 +88,46 @@ void main(){
     float ring1 = exp(-pow((prad - 0.46)*22.0, 2.0))*(0.10 + 0.22*step(0.82, fract(ang*9.549 + uTime*0.35)));
     float ring2 = exp(-pow((prad - 0.64)*26.0, 2.0))*(0.05 + 0.16*step(0.55, fract(ang*4.775 - uTime*0.22)));
     col += tint*(ring1 + ring2 + exp(-pow((prad - 0.30)*30.0, 2.0))*0.12)*(1.0 + uLevel*1.5 + uGlow*0.4);
+  } else if (sc == 10) {
+    // ============ CHAMBER II — soft luminous stage (premium arena) ============
+    // no hard grid: everything is gradients, soft rings and volumetric light so
+    // the room reads at the same fidelity as the head.
+    float r = length(ndc);
+    col = mix(vec3(0.010, 0.024, 0.038), vec3(0.001, 0.004, 0.009), smoothstep(0.0, 1.25, r));
+    // slow atmospheric haze for depth
+    float haze = fbm(vec3(ndc*1.05, uTime*0.03));
+    col += tint*0.055*haze*smoothstep(1.2, 0.05, r);
+    // two wide, soft key beams framing the head (low-freq volumetrics)
+    for (int i = 0; i < 2; i++) {
+      float sgn = i == 0 ? -1.0 : 1.0;
+      float bx = ndc.x - sgn*0.52 - (vNdc.y - 1.0)*sgn*0.34;
+      float beam = exp(-bx*bx*3.0)*smoothstep(-0.95, 0.9, vNdc.y);
+      col += tint*beam*0.06*(0.7 + 0.3*fbm(vec3(ndc*2.0, uTime*0.16 + float(i))));
+    }
+    // the STAGE: a soft circular pedestal glow, low-centre
+    vec2 fp = vec2(ndc.x, (vNdc.y + 0.88)*2.5);
+    float fr = length(fp);
+    col += tint*0.55*exp(-fr*fr*2.1)*(0.85 + uLevel*0.5 + uGlow*0.35);
+    // concentric SOFT rings sweeping outward on the floor (smooth, not lines)
+    float rings = 0.0;
+    for (int i = 0; i < 4; i++) {
+      float rr = 0.26 + float(i)*0.17 + fract(uTime*0.05)*0.17;
+      rings += exp(-pow((fr - rr)*6.5, 2.0));
+    }
+    col += tint*rings*0.065*(0.8 + uLevel*0.8);
+    // a soft bright horizon where stage meets void
+    col += tint*0.13*exp(-pow((vNdc.y + 0.36)*6.5, 2.0));
+    // floating dust motes (soft, parallax, drifting up + twinkling)
+    for (int i = 0; i < 2; i++) {
+      float dep = 1.0 + float(i)*1.3;
+      vec2 mp = ndc*(17.0 + float(i)*12.0) + vec2(sin(uTime*0.1 + float(i))*0.5, -uTime*(0.05 + float(i)*0.04));
+      vec2 cell = floor(mp); vec2 f2 = fract(mp) - 0.5;
+      float mote = step(0.987, hash21(cell + float(i)*23.0));
+      float twk = 0.4 + 0.6*pow(0.5 + 0.5*sin(uTime*(1.0 + hash21(cell)*2.0) + hash21(cell)*30.0), 2.0);
+      col += vec3(0.7, 0.85, 1.0)*mote*exp(-dot(f2, f2)*20.0)*(0.10/dep)*twk;
+    }
+    // faint ambient dome up top
+    col += tint*0.045*smoothstep(0.35, 1.0, vNdc.y);
   } else if (sc == 1) {
     // ================= DEEP SPACE =================
     col = vec3(0.002, 0.003, 0.008);

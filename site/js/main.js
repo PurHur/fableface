@@ -14,6 +14,7 @@ import { Wisp4Face } from './face-wisp4.js';
 import { Wisp5Face } from './face-wisp5.js';
 import { Wisp6Face } from './face-wisp6.js';
 import { Wisp7Face } from './face-wisp7.js';
+import { Wisp8Face } from './face-wisp8.js';
 // (EVE/RONIN/SONNY/ORACLE/VESSEL classes remain in the repo but are hidden
 // from the exhibit — the companion is the WISP lineage now.)
 
@@ -59,6 +60,7 @@ async function boot() {
   await new Promise(r => setTimeout(r, 20));
 
   const faces = {
+    wisp8: new Wisp8Face(gl, assets),
     wisp7: new Wisp7Face(gl, assets),
     wisp6: new Wisp6Face(gl, assets),
     wisp5: new Wisp5Face(gl, assets),
@@ -67,7 +69,7 @@ async function boot() {
     wisp2: new Wisp2Face(gl, assets),
     wisp: new WispFace(gl, assets),
   };
-  const order = ['wisp7', 'wisp6', 'wisp5', 'wisp4', 'wisp3', 'wisp2', 'wisp'];
+  const order = ['wisp8', 'wisp7', 'wisp6', 'wisp5', 'wisp4', 'wisp3', 'wisp2', 'wisp'];
 
   const driver = new PresenceDriver();
   const speech = new Speech(driver);
@@ -164,7 +166,7 @@ async function boot() {
     return streamQ.length;
   }
 
-  let active = 'wisp7';
+  let active = 'wisp8';
   let sceneIx = 0;
   let revealStart = performance.now();
 
@@ -246,6 +248,73 @@ async function boot() {
     emoSel.querySelectorAll('.emo').forEach(x => x.classList.toggle('on', x.dataset.emo === driver.emotion));
     stateSel.querySelectorAll('.state').forEach(x => x.classList.toggle('on', x.dataset.state === driver.state));
   }
+
+  // ---- TUNE: live config for WISP VIII (UI panel + FableFace config API) ----
+  const wisp8 = faces.wisp8;
+  const tuneEl = $('#tune'), tuneBtn = $('#tune-btn');
+  const tuneControls = {}; // cfg key -> setter(v), for syncing UI to state
+  const DEFAULT_CFG = () => JSON.parse(JSON.stringify(Wisp8Face.CFG));
+  function persistCfg() { try { localStorage.setItem('fableface.cfg', JSON.stringify(wisp8.cfg)); } catch (e) { } }
+  const hx = v => ('0' + Math.round(Math.min(1, Math.max(0, v)) * 255).toString(16)).slice(-2);
+  const toHex = c => '#' + hx(c[0]) + hx(c[1]) + hx(c[2]);
+  const fromHex = s => { const n = parseInt(s.slice(1), 16); return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]; };
+  function applyParam(key, val, opts = {}) {
+    wisp8.setCfg({ [key]: val });
+    if (!opts.noSync) syncTune();
+    persistCfg();
+    return wisp8.cfg[key];
+  }
+  function syncTune() { for (const key in tuneControls) tuneControls[key](wisp8.cfg[key]); }
+  function applyPreset(name) {
+    const p = Wisp8Face.PRESETS[name];
+    if (!p) return false;
+    wisp8.cfg = DEFAULT_CFG();   // presets overlay the defaults, not the current look
+    wisp8.setCfg(p);
+    syncTune(); persistCfg();
+    return true;
+  }
+  function resetCfg() { wisp8.cfg = DEFAULT_CFG(); syncTune(); persistCfg(); return true; }
+  function buildTune() {
+    const body = $('#tune-body');
+    Wisp8Face.PARAMS.forEach(group => {
+      const gt = document.createElement('div'); gt.className = 'tune-group-title'; gt.textContent = group.group; body.appendChild(gt);
+      group.items.forEach(it => {
+        const row = document.createElement('div'); row.className = 'tune-row';
+        const lab = document.createElement('span'); lab.className = 'tune-label'; lab.textContent = it.label; row.appendChild(lab);
+        if (it.type === 'color') {
+          const inp = document.createElement('input'); inp.type = 'color'; inp.value = toHex(wisp8.cfg[it.key]);
+          inp.addEventListener('input', () => applyParam(it.key, fromHex(inp.value), { noSync: true }));
+          row.appendChild(inp);
+          tuneControls[it.key] = v => { inp.value = toHex(v); };
+        } else if (it.type === 'toggle') {
+          const tog = document.createElement('button'); tog.type = 'button'; tog.className = 'tune-toggle' + (wisp8.cfg[it.key] ? ' on' : '');
+          tog.addEventListener('click', () => applyParam(it.key, !wisp8.cfg[it.key]));
+          row.appendChild(tog);
+          tuneControls[it.key] = v => tog.classList.toggle('on', !!v);
+        } else {
+          const inp = document.createElement('input'); inp.type = 'range'; inp.min = it.min; inp.max = it.max; inp.step = it.step; inp.value = wisp8.cfg[it.key];
+          const val = document.createElement('span'); val.className = 'tune-val'; val.textContent = (+wisp8.cfg[it.key]).toFixed(2);
+          inp.addEventListener('input', () => { val.textContent = (+inp.value).toFixed(2); applyParam(it.key, parseFloat(inp.value), { noSync: true }); });
+          row.appendChild(inp); row.appendChild(val);
+          tuneControls[it.key] = v => { inp.value = v; val.textContent = (+v).toFixed(2); };
+        }
+        body.appendChild(row);
+      });
+    });
+    const pr = $('#tune-presets');
+    Object.keys(Wisp8Face.PRESETS).forEach(name => {
+      const b = document.createElement('button'); b.className = 'tune-preset'; b.textContent = name;
+      b.addEventListener('click', () => applyPreset(name));
+      pr.appendChild(b);
+    });
+    const toggle = on => { tuneEl.hidden = on === undefined ? !tuneEl.hidden : !on; tuneBtn.classList.toggle('on', !tuneEl.hidden); };
+    tuneBtn.addEventListener('click', () => toggle());
+    $('#tune-close').addEventListener('click', () => toggle(false));
+    $('#tune-reset').addEventListener('click', resetCfg);
+  }
+  try { const saved = JSON.parse(localStorage.getItem('fableface.cfg') || 'null'); if (saved) wisp8.setCfg(saved); } catch (e) { }
+  buildTune();
+  syncTune();
 
   function updateVoiceLabel() {
     $('#voice-mode').textContent = speech.blockedText
@@ -460,8 +529,15 @@ async function boot() {
       }
       return true;
     },
+    // ---- WISP VIII live look config (mirrors the TUNE panel) ----
+    setParam: (key, val) => applyParam(key, val),
+    setConfig: (obj) => { wisp8.setCfg(obj); syncTune(); persistCfg(); return true; },
+    getConfig: () => JSON.parse(JSON.stringify(wisp8.cfg)),
+    resetConfig: () => resetCfg(),
+    preset: (name) => applyPreset(name),
+    listConfig: () => ({ params: Wisp8Face.PARAMS, presets: Object.keys(Wisp8Face.PRESETS), defaults: Wisp8Face.CFG }),
     // introspection
-    list: () => ({ emotions: EMOTION_NAMES, gestures: GESTURE_NAMES, states: STATES, faces: order, scenes: SCENES.map(x => x.key) }),
+    list: () => ({ emotions: EMOTION_NAMES, gestures: GESTURE_NAMES, states: STATES, faces: order, scenes: SCENES.map(x => x.key), config: Object.keys(wisp8.cfg) }),
     status: () => ({
       face: active, emotion: driver.emotion, intensity: driver.intensity, scene: SCENES[sceneIx].key,
       state: driver.state, speaking: speech.speaking, autopilot: driver.autopilot, fps: fpsShown,

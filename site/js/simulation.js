@@ -21,8 +21,8 @@ const SCRIPT = [
   },
   {
     op: 'Can we go somewhere beautiful?',
-    pre: [{ cmd: 'setScene', args: ['aurora'], at: 1.2 }],
-    reply: '[awe] How about the polar sky? [curious] Watch the ribbons move... [warm] I love it out here.',
+    pre: [{ cmd: 'setScene', args: ['chamber2'], at: 1.2 }],
+    reply: '[awe] Let the stage light up. [curious] Watch the motes orbit... [warm] I love it in here.',
   },
   {
     op: 'Bad news — the demo budget was cut.',

@@ -1,10 +1,14 @@
-# FABLEFACE — synthetic heads, six faces
+# FABLEFACE — a configurable synthetic presence
 
-Live at **https://fableface.purh.pw** — a comparison lab for rendering a talking,
-human-like AI presence in real time. One procedurally defined head (a GLSL signed
-distance function: skull, brow, articulated jaw, lips with an oral cavity,
-eyelids that blink) is rendered by three different techniques, plus two
-purpose-built heads:
+Live at **https://fableface.purh.pw** — a real-time, talking, human-like AI face
+rendered from one procedurally defined head (a GLSL signed distance function:
+skull, brow, articulated jaw, lips with an oral cavity, eyelids that blink). The
+default face is **WISP VIII "ANIMA"** — a fully configurable additive hologram:
+every effect is a live knob, reachable from the **⚙ TUNE** panel or the
+`FableFace.setParam()` / `preset()` API (see [Configure the look](#configure-the-look)).
+
+It headlines a lineage of eight WISP renderers, and the repo also keeps several
+purpose-built heads — all derived from the *same* SDF:
 
 | Face | Technique | Notes |
 |---|---|---|
@@ -21,11 +25,21 @@ ids, one readPixels), triangulated in JS with naive Surface Nets, and the
 particle cloud is area-uniform sampled from those triangles. So all three are
 provably the same head.
 
-## Gallery — the WISP lineage
+## Gallery
 
-Seven generations of the default hologram face. All seven are the *same* SDF
-head; only the rendering evolves — each version adds a layer of craft on the one
-before it.
+**WISP VIII "ANIMA"** — the configurable default, shown in the new **Chamber II**
+arena with an orrery of motes orbiting the head:
+
+![WISP VIII in Chamber II](shots/wisp8-hero.png)
+
+It takes the PORTRAIT pipeline further on every axis — a wider two-octave bloom, a
+new anamorphic lens streak, a themeable base colour, a stronger portrait key and
+brighter catchlights — and exposes all of it as live config (see below).
+
+### The lineage that led here
+
+Eight generations of the *same* SDF head; only the rendering evolves — each
+version adds a layer of craft on the one before it.
 
 | | | |
 |:-:|:-:|:-:|
@@ -39,6 +53,43 @@ before it.
 *Captured headless under software GL (SwiftShader). The raymarched glass shell
 and HDR bloom are fps-adaptive, so the later versions are noticeably richer on a
 real GPU — see the live site.*
+
+## Configure the look
+
+WISP VIII promotes ~30 formerly-hardcoded effects to live parameters. Adjust them
+in the **⚙ TUNE** panel (grouped sliders / colour / toggles + preset chips) or
+drive them from the SDK — settings persist in `localStorage`:
+
+```js
+FableFace.setParam('bloom', 0.9);          // one knob
+FableFace.setConfig({ baseCol: [1, 0.6, 0.2], anamorphic: 0.8 }); // several
+FableFace.preset('cinematic');             // anima · cinematic · hologram · neon · vivid · minimal · amber
+FableFace.getConfig();                     // read the current look
+FableFace.resetConfig();                   // back to defaults
+FableFace.listConfig();                    // full schema (groups, ranges, presets)
+```
+
+Groups: **Cinema** (exposure, bloom + threshold, anamorphic streak, chromatic
+aberration, grain, vignette, saturation, contrast, teal/orange), **Hologram**
+(base colour, scanlines, trail persistence, RGB separation, particle size, skin
+opacity), **Light** (key, rim/fresnel, warm counter-rim, catchlights, iris),
+**Life** (motion, breathing, cortical storms, voice resonance, coherence
+shimmer, sparkle), **Depth** (depth-of-field, fog), and **Toggles** (glass
+shell, scene rings, floor reflection).
+
+## Scenes
+
+Two rooms, both chamber-family:
+
+- **Chamber II** *(default)* — a soft luminous stage: volumetric key beams, a
+  glowing pedestal, soft concentric rings and drifting motes, with an **orrery**
+  of orbital particles sweeping around the head. No hard grid; it renders at the
+  same fidelity as the face.
+- **Chamber** — the original holo-room: perspective grid floor, data walls and a
+  rotating instrument dais.
+
+Switch with the SCENE chips, `FableFace.setScene('chamber2'|'chamber')`, or
+`?scene=`.
 
 ## Liveness
 
@@ -110,7 +161,7 @@ discipline), catchlights in the irises (pushed above the bloom threshold so they
 sparkle), thin-film grazing iridescence, quiet nose, 85mm-style long-lens framing
 (22° FOV, camera pulled back), split-toned grade (teal shadows / warm highlights),
 eyes-ignite-last entrance. Inherits the full CINEMA ENGINE (HDR/bloom/ACES/grade),
-GLASS MIND anatomy, and all 10 scenario worlds.
+GLASS MIND anatomy, and the chamber scenes. (WISP VIII supersedes it as the default.)
 
 ## The mathematics of being alive (research round)
 
