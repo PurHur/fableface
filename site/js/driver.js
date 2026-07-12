@@ -44,6 +44,20 @@ export const MOODS = {
 
 export const STATES = ['idle', 'listening', 'thinking', 'speaking', 'sleeping', 'alert'];
 
+// RECOMMENDED companion lifecycle — a suggestion, NOT a requirement. The API is
+// open: setState() accepts any state at any time. This graph documents the
+// default feel + the natural loop (idle → listening → thinking → speaking → idle)
+// that setState plays entry animations for; a steering AI may follow it or not.
+export const STATE_FLOW = {
+  idle:      { role: 'resting presence', anim: 'slow breath, wandering gaze, blinks; drifts bored→sleepy on inactivity', next: ['listening', 'thinking', 'speaking', 'alert', 'sleeping'] },
+  listening: { role: 'the user is speaking/typing', anim: 'attentive perk on entry, locked gaze, lean-in, "mhm" nods on utterance ends (feed listen(level))', next: ['thinking', 'speaking', 'idle'] },
+  thinking:  { role: 'the AI is working', anim: 'acknowledgment nod from listening, up-corner glances, glow pulse; 30s watchdog → idle', next: ['speaking', 'idle', 'alert'] },
+  speaking:  { role: 'the AI is talking', anim: 'visemes + word-synced nods/brow-flashes (auto while say()/sayStream runs)', next: ['idle', 'listening', 'thinking'] },
+  alert:     { role: 'urgent / needs attention', anim: 'startle on entry, wide eyes, raised brows, fast breath, bright glow', next: ['idle', 'speaking'] },
+  sleeping:  { role: 'at rest', anim: 'closed lids, slow breath; poke()/wake() rouses with a gentle startle', next: ['idle'] },
+};
+export const STATE_FLOW_LOOP = ['idle', 'listening', 'thinking', 'speaking'];
+
 // implicit expression overlays per state (blended on top of the chosen emotion)
 const STATE_OVERLAY = {
   listening: { vec: { spread: 0.14, browL: 0.16, browR: 0.12, roll: 0.03, pupil: 1.15, glow: 0.3, sacc: 1.6, wander: 0.25 }, w: 0.65 },
@@ -150,11 +164,19 @@ export class PresenceDriver {
 
   setState(state) {
     if (!STATES.includes(state)) return false;
+    const prev = this.state;
     if (state === 'sleeping') { this.blinkPhase = -1; }
-    if (this.state === 'sleeping' && state !== 'sleeping') this._playWake();
+    if (prev === 'sleeping' && state !== 'sleeping') this._playWake();
     this.state = state;
     this.s.state = state;
     this._idleT = 0;
+    // DEFAULT STATE-ENGINE entry beats (a recommendation — the API stays open;
+    // any setState is allowed and these just give each transition a distinct feel)
+    if (state !== prev) {
+      if (state === 'listening') this.react('curious', 0.14, 1.6);          // attentive perk
+      else if (state === 'thinking' && prev === 'listening') this.emote('nod'); // "I heard you" ack
+      else if (state === 'alert') { this.react('surprise', 0.3, 2.0); this.emote('alert'); }
+    }
     return true;
   }
 

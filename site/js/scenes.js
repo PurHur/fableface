@@ -1,26 +1,30 @@
-// scenes.js — 10 complex SCENARIOS: paired backdrop worlds + particle-FX modes,
-// selectable at runtime (uScene in one background shader; uFxMode/uFxTint on the
-// particle face). Every world stays emotion-tinted via uEmoCol.
+// scenes.js — EIGHT realistic chambers the AI companion inhabits and chooses to
+// fit the moment. Each is a soft, volumetric room (never a hard grid), rendered
+// in one fullscreen shader, driven by universal parameters the AI dials per
+// situation. Design + research: docs/chambers-design-2026-07.md.
 //
-//  0 CHAMBER   holo-chamber (grid floor, data walls, dais)     · fx standard
-//  1 DEEPSPACE starfield + nebula + dying sun                  · fx stardust
-//  2 RAINCITY  night city bokeh, rain streaks, neon wet floor  · fx neon split
-//  3 VAULT     server-rack corridor, LED matrices              · fx scan raster
-//  4 REACTOR   energy well, pulsing containment rings          · fx ember storm
-//  5 ABYSS     deep ocean, god-ray caustics, particulate       · fx bioluminesce
-//  6 TEMPLE    ancient columns, dust shafts, warm stone        · fx golden dust
-//  7 CODE      matrix glyph rain walls                         · fx code rows
-//  8 SWEEP     dark volumetric scanner room                    · fx voxon sweep
-//  9 AURORA    polar night, aurora curtains, star dome         · fx spectrum flow
+//   0 SOLARIUM    warm sunlit atrium         greeting / idle
+//   1 HEARTH      fireside + rain on glass   comfort / user sad
+//   2 VERDANT     forest glade, dappled sun  calm / restoration
+//   3 STILLWATER  misty reflecting pool      meditation / rest / night
+//   4 OBSERVATORY starfield + nebula         deep thinking / awe
+//   5 TERRACE     dusk rooftop, city bokeh   celebration / good news
+//   6 CLEARMIND   cool even studio           focused work / help
+//   7 SIGNAL ROOM stark amber alert space    alert / urgent
+//
+// params: [light(night..day), warmth(cool..warm), fog, energy, ambient] (0..1)
 
 import { GLSL_COMMON, glslHeader } from './headsdf.js';
 
-// Reduced to the chamber family. CHAMBER II is the premium default arena — a
-// soft luminous stage (no hard grid) with an orrery of orbital motes around the
-// head (WISP VIII fx 10). CHAMBER is the original holo-room, kept for contrast.
 export const SCENES = [
-  { key: 'chamber2', name: 'CHAMBER II', bg: 10, fx: 10, tint: [1, 1, 1], grade: { sat: 1.06, con: 1.07, exp: 0.95, lift: [0, 0.011, 0.02] } },
-  { key: 'chamber', name: 'CHAMBER', bg: 0, fx: 0, tint: [1, 1, 1], grade: { sat: 1.06, con: 1.07, exp: 0.92, lift: [0, 0.012, 0.022] } },
+  { key: 'solarium',    name: 'SOLARIUM',    bg: 0, fx: 20, tint: [1.04, 1.0, 0.94], params: [0.85, 0.62, 0.35, 0.35, 0.5], grade: { sat: 1.05, con: 1.05, exp: 1.0, lift: [0.02, 0.014, 0.004] } },
+  { key: 'hearth',      name: 'HEARTH',      bg: 1, fx: 21, tint: [1.1, 0.9, 0.72],  params: [0.28, 0.95, 0.5, 0.5, 0.6],  grade: { sat: 1.1, con: 1.1, exp: 0.95, lift: [0.03, 0.008, 0] } },
+  { key: 'verdant',     name: 'VERDANT',     bg: 2, fx: 22, tint: [0.95, 1.06, 0.95], params: [0.75, 0.55, 0.4, 0.4, 0.5],  grade: { sat: 1.12, con: 1.06, exp: 1.0, lift: [0.006, 0.018, 0.008] } },
+  { key: 'stillwater',  name: 'STILLWATER',  bg: 3, fx: 23, tint: [0.94, 1.02, 1.04], params: [0.6, 0.45, 0.6, 0.2, 0.3],   grade: { sat: 1.0, con: 1.04, exp: 0.98, lift: [0.004, 0.016, 0.022] } },
+  { key: 'observatory', name: 'OBSERVATORY', bg: 4, fx: 24, tint: [0.9, 0.94, 1.12],  params: [0.12, 0.4, 0.3, 0.25, 0.7],  grade: { sat: 1.14, con: 1.12, exp: 1.0, lift: [0.006, 0.004, 0.03] } },
+  { key: 'terrace',     name: 'TERRACE',     bg: 5, fx: 25, tint: [1.08, 0.92, 0.9],  params: [0.5, 0.75, 0.45, 0.6, 0.6],  grade: { sat: 1.18, con: 1.08, exp: 0.98, lift: [0.03, 0.006, 0.018] } },
+  { key: 'clearmind',   name: 'CLEARMIND',   bg: 6, fx: 26, tint: [0.96, 1.0, 1.05],  params: [0.8, 0.4, 0.2, 0.15, 0.15],  grade: { sat: 0.94, con: 1.05, exp: 1.0, lift: [0.004, 0.01, 0.016] } },
+  { key: 'signal',      name: 'SIGNAL ROOM', bg: 7, fx: 27, tint: [1.06, 0.96, 0.9],  params: [0.25, 0.5, 0.3, 0.3, 0.1],   grade: { sat: 1.06, con: 1.16, exp: 0.95, lift: [0.02, 0.008, 0.006] } },
 ];
 
 export const SCENE_BG_VS = `#version 300 es
@@ -34,355 +38,152 @@ in vec2 vNdc;
 uniform vec2 uRes;
 uniform float uTime, uLevel, uGlow, uScene;
 uniform vec3 uEmoCol;
+// universal scene params (WISP VIII drives these; uCustom<0.5 => baked defaults)
+uniform float uCustom, uSLight, uSWarmth, uSFog, uSEnergy, uSAmb;
 out vec4 outColor;
+
+// correlated colour temperature: cool (0) -> warm (1), as a light tint
+vec3 cct(float w){ return mix(vec3(0.80,0.89,1.06), vec3(1.12,0.72,0.40), clamp(w,0.0,1.0)); }
+// a soft round glow pool
+float pool(vec2 p, vec2 c, float k){ return exp(-dot((p-c),(p-c))*k); }
+// grid-cell twinkling motes/particles in [uv] space
+float motes(vec2 p, float dens, float t, float seed){
+  vec2 g=p*dens; vec2 id=floor(g); vec2 f=fract(g)-0.5;
+  float on=step(0.986, hash21(id+seed));
+  float d=length(f-(hash33(vec3(id,seed)).xy-0.5)*0.6);
+  float tw=0.4+0.6*pow(0.5+0.5*sin(t*(1.0+hash21(id)*2.0)+hash21(id)*30.0),2.0);
+  return on*exp(-d*d*22.0)*tw;
+}
 
 void main(){
   vec2 ndc = vNdc*vec2(uRes.x/uRes.y, 1.0);
-  vec3 tint = mix(vec3(0.10, 0.55, 0.75), uEmoCol, 0.55);
+  float t = uTime;
   vec3 col = vec3(0.0);
   int sc = int(uScene + 0.5);
 
   if (sc == 0) {
-    // ================= CHAMBER (the original holo-room) =================
-    col = mix(vec3(0.003, 0.007, 0.012), vec3(0.008, 0.022, 0.034),
-              clamp(1.0 - length(ndc)*0.62, 0.0, 1.0));
-    float hor = -0.16;
-    if (vNdc.y < hor) {
-      float dist = 0.09/(hor - vNdc.y);
-      float wx = ndc.x*dist*10.0;
-      float wz = dist*10.0 + uTime*0.30;
-      float fog = exp(-dist*1.25);
-      vec2 g = abs(fract(vec2(wx, wz)) - 0.5);
-      float lw = 0.030*(1.0 + dist*1.1);
-      float grid = max(smoothstep(lw, lw*0.3, g.x), smoothstep(lw, lw*0.3, g.y));
-      col += tint*grid*0.13*fog;
-      vec2 g5 = abs(fract(vec2(wx, wz)/5.0) - 0.5);
-      float grid5 = max(smoothstep(0.013*(1.0 + dist), 0.004, g5.x),
-                        smoothstep(0.013*(1.0 + dist), 0.004, g5.y));
-      col += tint*grid5*0.11*fog;
-      float colId = floor(wx + 0.5);
-      float has = step(0.70, hash11(colId*13.37));
-      float pz = fract(wz*0.11 + hash11(colId*7.7)*7.0 - uTime*0.50);
-      float pulse = exp(-pow((pz - 0.5)*13.0, 2.0));
-      col += tint*has*smoothstep(lw, 0.0, g.x)*pulse*0.85*fog*(0.7 + uLevel*1.3);
-    }
-    col += tint*0.15*exp(-pow((vNdc.y - hor)*9.0, 2.0));
-    for (int i = 0; i < 3; i++) {
-      float fi = float(i);
-      float depth = 1.0 + fi*0.9;
-      vec2 wc = vec2(ndc.x*depth + uTime*0.008*(fi - 1.0), (vNdc.y - hor)*depth);
-      float colX = floor(wc.x/0.030);
-      float colHas = step(0.80, hash11(colX*3.1 + fi*17.0));
-      vec2 id2 = vec2(colX, floor((wc.y + uTime*(0.05 + hash11(colX*9.0)*0.13))/0.011));
-      float on = step(0.55, hash21(id2 + fi*31.0));
-      float flick = 0.6 + 0.4*hash21(id2 + floor(uTime*6.0));
-      col += tint*colHas*on*flick*0.030*exp(-fi*0.9)*smoothstep(hor, hor + 0.25, vNdc.y);
-    }
-    float dwell = length(vec2(ndc.x*1.6, (vNdc.y + 1.06)*3.2));
-    col += tint*0.55*exp(-dwell*dwell*1.8)*(0.9 + uLevel*0.5);
-    float cone = exp(-pow(ndc.x/(0.16 + (vNdc.y + 1.0)*0.34), 2.0))*exp(-(vNdc.y + 1.0)*1.15);
-    col += tint*cone*0.40;
-    vec2 pc = vec2(ndc.x, (vNdc.y + 0.86)*3.4);
-    float prad = length(pc);
-    float ang = atan(pc.y, pc.x);
-    float ring1 = exp(-pow((prad - 0.46)*22.0, 2.0))*(0.10 + 0.22*step(0.82, fract(ang*9.549 + uTime*0.35)));
-    float ring2 = exp(-pow((prad - 0.64)*26.0, 2.0))*(0.05 + 0.16*step(0.55, fract(ang*4.775 - uTime*0.22)));
-    col += tint*(ring1 + ring2 + exp(-pow((prad - 0.30)*30.0, 2.0))*0.12)*(1.0 + uLevel*1.5 + uGlow*0.4);
-  } else if (sc == 10) {
-    // ============ CHAMBER II — soft luminous stage (premium arena) ============
-    // no hard grid: everything is gradients, soft rings and volumetric light so
-    // the room reads at the same fidelity as the head.
-    float r = length(ndc);
-    col = mix(vec3(0.010, 0.024, 0.038), vec3(0.001, 0.004, 0.009), smoothstep(0.0, 1.25, r));
-    // slow atmospheric haze for depth
-    float haze = fbm(vec3(ndc*1.05, uTime*0.03));
-    col += tint*0.055*haze*smoothstep(1.2, 0.05, r);
-    // two wide, soft key beams framing the head (low-freq volumetrics)
-    for (int i = 0; i < 2; i++) {
-      float sgn = i == 0 ? -1.0 : 1.0;
-      float bx = ndc.x - sgn*0.52 - (vNdc.y - 1.0)*sgn*0.34;
-      float beam = exp(-bx*bx*3.0)*smoothstep(-0.95, 0.9, vNdc.y);
-      col += tint*beam*0.06*(0.7 + 0.3*fbm(vec3(ndc*2.0, uTime*0.16 + float(i))));
-    }
-    // the STAGE: a soft circular pedestal glow, low-centre
-    vec2 fp = vec2(ndc.x, (vNdc.y + 0.88)*2.5);
-    float fr = length(fp);
-    col += tint*0.55*exp(-fr*fr*2.1)*(0.85 + uLevel*0.5 + uGlow*0.35);
-    // concentric SOFT rings sweeping outward on the floor (smooth, not lines)
-    float rings = 0.0;
-    for (int i = 0; i < 4; i++) {
-      float rr = 0.26 + float(i)*0.17 + fract(uTime*0.05)*0.17;
-      rings += exp(-pow((fr - rr)*6.5, 2.0));
-    }
-    col += tint*rings*0.065*(0.8 + uLevel*0.8);
-    // a soft bright horizon where stage meets void
-    col += tint*0.13*exp(-pow((vNdc.y + 0.36)*6.5, 2.0));
-    // floating dust motes (soft, parallax, drifting up + twinkling)
-    for (int i = 0; i < 2; i++) {
-      float dep = 1.0 + float(i)*1.3;
-      vec2 mp = ndc*(17.0 + float(i)*12.0) + vec2(sin(uTime*0.1 + float(i))*0.5, -uTime*(0.05 + float(i)*0.04));
-      vec2 cell = floor(mp); vec2 f2 = fract(mp) - 0.5;
-      float mote = step(0.987, hash21(cell + float(i)*23.0));
-      float twk = 0.4 + 0.6*pow(0.5 + 0.5*sin(uTime*(1.0 + hash21(cell)*2.0) + hash21(cell)*30.0), 2.0);
-      col += vec3(0.7, 0.85, 1.0)*mote*exp(-dot(f2, f2)*20.0)*(0.10/dep)*twk;
-    }
-    // faint ambient dome up top
-    col += tint*0.045*smoothstep(0.35, 1.0, vNdc.y);
+    // ===== SOLARIUM — warm sunlit atrium (greeting) =====
+    float L = uCustom>0.5?uSLight:0.85, W = uCustom>0.5?uSWarmth:0.62, F = uCustom>0.5?uSFog:0.35, A = uCustom>0.5?uSAmb:0.5;
+    vec3 warm = cct(W);
+    col = mix(vec3(0.04,0.045,0.05), vec3(0.27,0.24,0.19)*warm, smoothstep(0.95,-0.7,vNdc.y))*(0.4+0.55*L);
+    // slanted window daylight shaft + soft flicker
+    float across = ndc.x - 0.34 - (vNdc.y-0.6)*0.55;
+    float sh = smoothstep(0.55,0.0,abs(across))*smoothstep(-0.9,0.7,vNdc.y)*(0.7+0.3*fbm(vec3(ndc*2.0,t*0.1)));
+    col += warm*sh*0.42*L;
+    col += warm*motes(ndc, 18.0+A*8.0, t*0.4, 3.0)*sh*A*1.4;   // dust in the beam
+    col += warm*0.34*pool(vec2(ndc.x, (vNdc.y+0.72)*2.0), vec2(0.1,0.0), 2.0)*(0.7+0.4*L); // floor light pool
+    col *= 1.0 - 0.45*smoothstep(0.30,0.55,length(vec2(ndc.x+0.95,(vNdc.y+0.5)*0.8)))*0.0; // (foliage placeholder)
+    col = mix(col, vec3(0.42,0.38,0.32)*warm, F*0.28*smoothstep(-0.3,0.9,vNdc.y));
   } else if (sc == 1) {
-    // ================= DEEP SPACE =================
-    col = vec3(0.002, 0.003, 0.008);
-    // star layers
-    for (int i = 0; i < 3; i++) {
-      float dep = 1.0 + float(i)*1.4;
-      vec2 sp = ndc*(46.0 + float(i)*38.0) + vec2(uTime*0.01*dep, float(i)*29.0);
-      vec2 cell = floor(sp);
-      vec2 fr = fract(sp) - 0.5;
-      float star = step(0.992 - float(i)*0.004, hash21(cell));
-      float tw2 = 0.5 + 0.5*sin(uTime*(1.0 + hash21(cell + 7.0)*3.0) + hash21(cell)*40.0);
-      col += vec3(0.8, 0.9, 1.0)*star*exp(-dot(fr, fr)*22.0)*(0.25/dep)*tw2;
-    }
-    // nebula
-    float neb = fbm(vec3(ndc*1.4, uTime*0.015));
-    float neb2 = fbm(vec3(ndc*2.3 + 5.0, uTime*0.01));
-    col += mix(vec3(0.05, 0.02, 0.12), tint*0.35, neb2)*pow(neb, 2.4)*0.85;
-    // ringed planet, lower right
-    vec2 pl = ndc - vec2(1.05, -0.45);
-    float plD = length(pl);
-    col = mix(col, vec3(0.05, 0.08, 0.13), smoothstep(0.19, 0.185, plD));
-    col += vec3(0.3, 0.5, 0.7)*exp(-pow((plD - 0.185)*40.0, 2.0))*0.4; // limb glow
-    float ringE = abs(pl.y*3.4 + pl.x*0.5);
-    col += vec3(0.55, 0.6, 0.7)*exp(-pow((length(vec2(pl.x, pl.y*3.4)) - 0.30)*22.0, 2.0))*0.25*step(0.05, abs(pl.y*3.0 - pl.x*0.2) + step(plD, 0.185));
-    // dying sun, lower left
-    float sunD = length(ndc - vec2(-1.1, -0.55));
-    col += vec3(1.0, 0.45, 0.2)*exp(-sunD*sunD*2.2)*0.35*(0.85 + 0.15*sin(uTime*0.7));
-    col += vec3(1.0, 0.7, 0.4)*exp(-sunD*22.0)*0.9;
+    // ===== HEARTH — fireside + rain on glass (comfort) =====
+    float L = uCustom>0.5?uSLight:0.28, W = uCustom>0.5?uSWarmth:0.95, F = uCustom>0.5?uSFog:0.5, A = uCustom>0.5?uSAmb:0.6;
+    vec3 fire = mix(vec3(1.0,0.55,0.22), vec3(1.0,0.42,0.16), 0.5);
+    col = vec3(0.03,0.018,0.012)*(0.6+L);                       // warm near-black
+    float flick = 0.8 + 0.2*fbm(vec3(t*3.0, t*1.7, 0.0)) + 0.06*sin(t*1.1);
+    col += fire*pool(vec2(ndc.x, (vNdc.y+0.85)*1.3), vec2(0.0,0.0), 2.4)*(1.6+1.2*L)*flick; // fire glow
+    col += vec3(1.0,0.7,0.3)*pool(vec2(ndc.x,(vNdc.y+0.9)*1.1), vec2(0.0,0.0), 6.0)*0.7*flick;
+    // rain streaks on an implied window (upper area, cool)
+    vec2 rp = vec2(ndc.x*26.0, vNdc.y*5.0 + t*1.4);
+    float rain = step(0.93, hash11(floor(rp.x)))*smoothstep(0.45,0.0,abs(fract(rp.y)-0.5));
+    col += vec3(0.4,0.5,0.62)*rain*0.05*smoothstep(-0.2,0.9,vNdc.y);
+    // refuge: deep enclosing vignette
+    col *= 1.0 - 0.55*smoothstep(0.5,1.15,length(ndc*vec2(0.85,0.95)));
+    col = mix(col, vec3(0.20,0.09,0.04), F*0.25);
   } else if (sc == 2) {
-    // ================= RAIN CITY =================
-    col = mix(vec3(0.004, 0.004, 0.010), vec3(0.015, 0.010, 0.028), clamp(vNdc.y + 0.6, 0.0, 1.0));
-    // bokeh window lights, 3 parallax towers
-    for (int i = 0; i < 3; i++) {
-      float dep = 1.0 + float(i)*0.8;
-      vec2 wc = vec2(ndc.x*dep + float(i)*3.7, (vNdc.y + 0.1)*dep);
-      vec2 cell = floor(wc*vec2(9.0, 16.0));
-      vec2 fr = fract(wc*vec2(9.0, 16.0)) - 0.5;
-      float lit = step(0.72, hash21(cell + float(i)*13.0));
-      vec3 wcol = mix(vec3(1.0, 0.7, 0.35), vec3(0.4, 0.8, 1.0), hash21(cell + 3.0));
-      float soft = exp(-dot(fr, fr)*(9.0 - float(i)*2.0));
-      col += wcol*lit*soft*(0.05/dep)*(0.75 + 0.25*hash21(cell + floor(uTime*2.0)));
-    }
-    // neon signs
-    float nx = exp(-pow((ndc.x + 0.85)*7.0, 2.0))*exp(-pow((vNdc.y - 0.12)*11.0, 2.0));
-    col += vec3(1.0, 0.2, 0.65)*nx*(0.5 + 0.5*step(0.3, fract(uTime*0.8)));
-    float nx2 = exp(-pow((ndc.x - 0.95)*8.0, 2.0))*exp(-pow((vNdc.y - 0.3)*9.0, 2.0));
-    col += vec3(0.2, 0.9, 1.0)*nx2*0.5;
-    // rain streaks
-    for (int i = 0; i < 2; i++) {
-      float dep = 1.0 + float(i);
-      vec2 rp = vec2(ndc.x*30.0*dep + float(i)*17.0, vNdc.y*4.0*dep + uTime*(3.5 + float(i)*1.5));
-      float drop = step(0.94, hash11(floor(rp.x)))*smoothstep(0.4, 0.0, abs(fract(rp.y) - 0.5));
-      col += vec3(0.5, 0.65, 0.85)*drop*0.05/dep;
-    }
-    // lightning: rare double-flash washing the sky
-    float lSeed = floor(uTime*0.29);
-    if (hash11(lSeed) > 0.86) {
-      float lp = fract(uTime*0.29);
-      float flash = exp(-lp*22.0) + 0.6*exp(-pow((lp - 0.12)*30.0, 2.0));
-      col += vec3(0.45, 0.5, 0.7)*flash*smoothstep(-0.3, 0.9, vNdc.y);
-    }
-    // wet floor: smeared reflections below horizon
-    if (vNdc.y < -0.35) {
-      float m = (vNdc.y + 0.35)*-3.0;
-      col += tint*0.06*m*(0.6 + 0.4*sin(ndc.x*40.0 + uTime*2.0));
-      col *= 1.0 + m*0.5;
-    }
+    // ===== VERDANT — forest glade, dappled canopy light (calm) =====
+    float L = uCustom>0.5?uSLight:0.75, W = uCustom>0.5?uSWarmth:0.55, F = uCustom>0.5?uSFog:0.4, A = uCustom>0.5?uSAmb:0.5;
+    vec3 shaftC = cct(W)*vec3(1.0,1.0,0.9);
+    col = mix(vec3(0.02,0.05,0.03), vec3(0.06,0.16,0.09), smoothstep(0.9,-0.6,vNdc.y))*(0.5+0.7*L);
+    // sky peek (prospect) up top
+    col += vec3(0.5,0.68,0.7)*smoothstep(0.35,0.95,vNdc.y)*0.25*L;
+    // dappled canopy shafts from upper-back, broken by a moving leaf mask
+    vec2 sway = vec2(sin(t*0.5)*0.03, 0.0);
+    float leaves = fbm(vec3(ndc*3.0 + sway, t*0.05));
+    float shaft = smoothstep(0.4,0.9,leaves)*smoothstep(-0.7,0.9,vNdc.y);
+    float shaftDir = smoothstep(0.6,0.0,abs(ndc.x - 0.2 - (vNdc.y-0.5)*0.6));
+    col += shaftC*shaft*shaftDir*0.5*L;
+    // refuge: dark leafy foreground
+    col *= 1.0 - 0.5*smoothstep(0.4,1.0,length(ndc*vec2(0.8,1.0)));
+    col += vec3(0.9,1.0,0.7)*motes(ndc, 14.0+A*8.0, t*0.3, 7.0)*A*0.9; // pollen
+    col = mix(col, vec3(0.20,0.28,0.16), F*0.3*smoothstep(-0.2,0.9,vNdc.y)); // green-gold haze
   } else if (sc == 3) {
-    // ================= VAULT (server corridor) =================
-    col = vec3(0.004, 0.007, 0.009);
-    // perspective rack walls: LED matrices converging to center
-    for (int side = 0; side < 2; side++) {
-      float sgn = side == 0 ? -1.0 : 1.0;
-      float ax = abs(ndc.x);
-      if (sgn*ndc.x > 0.15) {
-        float dist = 0.35/max(ax - 0.12, 0.02);
-        float wy = vNdc.y*dist*4.0;
-        float wz = dist*3.0 + uTime*0.12;
-        vec2 cell = floor(vec2(wz*3.0, wy*2.4));
-        float fog = exp(-dist*0.55);
-        float led = step(0.35, hash21(cell));
-        vec3 lcol = mix(tint, vec3(0.2, 1.0, 0.45), step(0.85, hash21(cell + 5.0)));
-        lcol = mix(lcol, vec3(1.0, 0.35, 0.2), step(0.94, hash21(cell + 9.0)));
-        float blink = 0.5 + 0.5*step(0.4, hash21(cell + floor(uTime*(2.0 + hash21(cell)*6.0))));
-        col += lcol*led*blink*0.10*fog;
-      }
+    // ===== STILLWATER — misty reflecting pool (meditation / rest) =====
+    float L = uCustom>0.5?uSLight:0.6, W = uCustom>0.5?uSWarmth:0.45, F = uCustom>0.5?uSFog:0.6, A = uCustom>0.5?uSAmb:0.3;
+    float horizon = -0.2;
+    vec3 sky = mix(vec3(0.55,0.66,0.68), vec3(0.30,0.42,0.48), smoothstep(0.9,horizon,vNdc.y))*cct(W)*(0.4+0.7*L);
+    if (vNdc.y > horizon) {
+      col = sky;
+    } else {
+      // still water: blurred reflection of the sky + concentric breath ripples
+      float m = (horizon - vNdc.y);
+      vec3 refl = mix(vec3(0.30,0.42,0.48), vec3(0.10,0.18,0.22), smoothstep(0.0,0.6,m))*cct(W)*(0.4+0.6*L);
+      float rr = length(vec2(ndc.x, m*1.6));
+      float ripple = 0.5+0.5*sin(rr*10.0 - t*(0.6+uLevel*1.5));
+      refl += vec3(0.6,0.75,0.8)*pow(ripple,3.0)*exp(-rr*1.4)*0.12*(0.6+uGlow);
+      col = refl;
     }
-    // service drone light sweeping down the corridor
-    float dz = fract(uTime*0.11);
-    float droneY = -0.15 + sin(uTime*0.8)*0.05;
-    float droneS = exp(-pow((ndc.x - mix(1.6, -1.6, dz))*4.0, 2.0))*exp(-pow((vNdc.y - droneY)*8.0, 2.0));
-    col += vec3(1.0, 0.85, 0.5)*droneS*0.35;
-    // cold corridor floor strip + ceiling lights
-    col += tint*0.3*exp(-pow(vNdc.y + 0.75, 2.0)*14.0)*exp(-ndc.x*ndc.x*1.4);
-    float ceil2 = exp(-pow(vNdc.y - 0.8, 2.0)*40.0)*step(0.6, fract(ndc.x*2.0 + 0.3));
-    col += vec3(0.7, 0.85, 1.0)*ceil2*0.14;
+    // drifting mist bands
+    float mist = fbm(vec3(ndc*vec2(1.2,3.0) + vec2(t*0.03,0.0), 0.0));
+    col = mix(col, vec3(0.72,0.80,0.80), F*0.4*smoothstep(0.3,0.8,mist)*smoothstep(-0.6,0.4,vNdc.y));
+    col += vec3(0.8,0.88,0.9)*motes(ndc, 10.0, t*0.15, 5.0)*A*0.4; // sparse mist motes
   } else if (sc == 4) {
-    // ================= REACTOR =================
-    col = mix(vec3(0.02, 0.004, 0.002), vec3(0.05, 0.01, 0.004), clamp(1.0 - length(ndc), 0.0, 1.0));
-    // energy well below
-    float wellD = length(vec2(ndc.x, (vNdc.y + 1.15)*1.6));
-    float churn = fbm(vec3(ndc.x*3.0, vNdc.y*2.0 - uTime*0.4, uTime*0.1));
-    col += vec3(1.0, 0.42, 0.1)*exp(-wellD*wellD*1.3)*(0.6 + 0.5*churn)*(0.9 + uLevel*0.6);
-    col += vec3(1.0, 0.8, 0.3)*exp(-wellD*6.0)*0.8;
-    // containment rings pulsing upward
-    for (int i = 0; i < 4; i++) {
-      float ph = fract(uTime*0.14 + float(i)*0.25);
-      float ry = mix(-0.9, 0.9, ph);
-      float ring = exp(-pow((vNdc.y - ry)*14.0, 2.0))*exp(-pow(ndc.x*0.7, 2.0));
-      col += vec3(1.0, 0.5, 0.2)*ring*0.10*(1.0 - ph);
-    }
-    // rotating sweep beam inside the well
-    float bAng = atan(vNdc.y + 1.15, ndc.x);
-    float beam = exp(-pow(sin(bAng - uTime*0.9)*4.0, 2.0))*exp(-wellD*wellD*1.1);
-    col += vec3(1.0, 0.55, 0.2)*beam*0.30;
-    // rising heat sparks
-    vec2 hp = vec2(ndc.x*14.0, vNdc.y*8.0 - uTime*1.6);
-    float ember = step(0.985, hash21(floor(hp)))*smoothstep(0.5, 0.0, length(fract(hp) - 0.5));
-    col += vec3(1.0, 0.6, 0.25)*ember*0.5;
-    // warning strobe (subtle, slow)
-    col += vec3(0.6, 0.05, 0.02)*0.05*step(0.92, fract(uTime*0.25));
+    // ===== OBSERVATORY — starfield + nebula (thinking / awe) =====
+    float L = uCustom>0.5?uSLight:0.12, F = uCustom>0.5?uSFog:0.3, A = uCustom>0.5?uSAmb:0.7, E = uCustom>0.5?uSEnergy:0.25;
+    col = vec3(0.01,0.012,0.025)*(0.5+L);
+    // domain-warped nebula (parallax) — soft, emissive
+    vec2 q = vec2(fbm(vec3(ndc*1.3, t*0.02)), fbm(vec3(ndc*1.3+5.2, t*0.015)));
+    float neb = fbm(vec3(ndc*1.6 + 3.0*q, t*0.01));
+    col += mix(vec3(0.10,0.06,0.20), mix(vec3(0.12,0.35,0.42), uEmoCol*0.5, uGlow*0.4), smoothstep(0.3,0.9,neb))*pow(neb,2.2)*(0.7+F);
+    // three star layers, parallax + twinkle
+    col += vec3(0.9,0.95,1.0)*motes(ndc, 40.0, t*E*2.0, 1.0)*1.6*A;
+    col += vec3(1.0,0.92,0.82)*motes(ndc*1.7+7.0, 60.0, t*E*2.0, 9.0)*0.9*A;
+    col += vec3(0.85,0.9,1.0)*motes(ndc*0.7-3.0, 24.0, t*E*2.0, 4.0)*A;
+    col *= 1.0 - 0.35*smoothstep(0.7,1.3,length(ndc)); // gentle deep-field vignette
   } else if (sc == 5) {
-    // ================= ABYSS =================
-    float depthG = clamp(1.0 - (vNdc.y + 1.0)*0.5, 0.0, 1.0);
-    col = mix(vec3(0.0, 0.02, 0.045), vec3(0.0, 0.005, 0.015), depthG);
-    // god-ray caustic shafts from above
-    for (int i = 0; i < 3; i++) {
-      float fi = float(i);
-      float rx = ndc.x + sin(uTime*0.1 + fi*2.1)*0.3 + fi*0.5 - 0.5;
-      float shaft = exp(-rx*rx*(5.0 + fi*3.0))*smoothstep(-0.6, 1.0, vNdc.y);
-      float flick2 = 0.7 + 0.3*fbm(vec3(rx*4.0, uTime*0.3, fi));
-      col += vec3(0.1, 0.45, 0.5)*shaft*0.10*flick2;
+    // ===== TERRACE — dusk rooftop over a city (celebration) =====
+    float L = uCustom>0.5?uSLight:0.5, W = uCustom>0.5?uSWarmth:0.75, F = uCustom>0.5?uSFog:0.45, A = uCustom>0.5?uSAmb:0.6;
+    // magic-hour vertical gradient: violet zenith -> coral horizon
+    col = mix(vec3(0.66,0.34,0.24), vec3(0.22,0.13,0.30), smoothstep(-0.3,0.95,vNdc.y))*(0.4+0.5*L);
+    col += vec3(1.0,0.7,0.4)*exp(-max(vNdc.y+0.2,0.0)*3.5)*0.32*L; // warm horizon bloom
+    // city light bokeh below the rail
+    if (vNdc.y < -0.15) {
+      vec2 cp = vec2(ndc.x*8.0, (vNdc.y+0.15)*10.0);
+      vec2 id=floor(cp); float lit=step(0.6,hash21(id));
+      vec3 wc = mix(vec3(1.0,0.75,0.4), vec3(0.5,0.8,1.0), hash21(id+3.0));
+      col += wc*lit*exp(-dot(fract(cp)-0.5,fract(cp)-0.5)*9.0)*0.14*(0.7+0.3*hash21(id+floor(t*2.0)));
     }
-    // caustic web near the top
-    float web = fbm(vec3(ndc*4.0 + vec2(uTime*0.12, 0.0), uTime*0.2));
-    col += vec3(0.15, 0.5, 0.55)*pow(web, 3.0)*smoothstep(0.1, 0.9, vNdc.y)*0.7;
-    // the leviathan: a vast shadow crossing behind, rarely
-    float lvSeed = floor(uTime*0.04);
-    if (hash11(lvSeed) > 0.5) {
-      float lvP = fract(uTime*0.04);
-      vec2 lv = ndc - vec2(mix(-2.6, 2.6, lvP)*(hash11(lvSeed + 2.0) > 0.5 ? 1.0 : -1.0), 0.35 + sin(lvP*6.28)*0.1);
-      float body = exp(-pow(lv.x*1.1, 2.0) - pow(lv.y*4.5, 2.0));
-      col *= 1.0 - body*0.55;
-      col += vec3(0.0, 0.15, 0.14)*exp(-pow(lv.x*1.4, 2.0) - pow((lv.y - 0.12)*7.0, 2.0))*0.3; // faint dorsal glow
-    }
-    // drifting particulate + rare fish silhouette shimmer
-    for (int i = 0; i < 2; i++) {
-      vec2 mp = ndc*(22.0 + float(i)*18.0) + vec2(uTime*(0.25 + float(i)*0.2), -uTime*(0.5 + float(i)*0.3));
-      vec2 fr = fract(mp) - 0.5;
-      col += vec3(0.3, 0.6, 0.6)*step(0.99, hash21(floor(mp)))*exp(-dot(fr, fr)*18.0)*0.10;
-    }
+    col += cct(W)*motes(ndc, 12.0, t*0.5, 6.0)*A*0.5;          // warm drifting sparks
+    col = mix(col, vec3(0.7,0.45,0.4), F*0.3*smoothstep(-0.4,0.6,vNdc.y)); // warm haze
   } else if (sc == 6) {
-    // ================= TEMPLE =================
-    col = mix(vec3(0.03, 0.02, 0.012), vec3(0.012, 0.008, 0.005), clamp(length(ndc)*0.7, 0.0, 1.0));
-    // column silhouettes (dark vertical bands with warm rim)
-    float colPat = abs(fract(ndc.x*1.3 + 0.5) - 0.5);
-    float pillar = smoothstep(0.32, 0.30, colPat);
-    float rimL = smoothstep(0.30, 0.295, colPat) - smoothstep(0.295, 0.27, colPat);
-    col *= 1.0 - pillar*0.75;
-    col += vec3(1.0, 0.7, 0.35)*rimL*0.10;
-    // god-rays from upper right
-    float ray = exp(-pow((ndc.x - 0.9 + (vNdc.y - 1.0)*0.7)*2.2, 2.0));
-    float rayN = 0.75 + 0.25*fbm(vec3(ndc*3.0, uTime*0.1));
-    col += vec3(1.0, 0.75, 0.4)*ray*smoothstep(-0.6, 0.8, vNdc.y)*0.16*rayN;
-    // brazier glow at floor left + drifting dust
-    col += vec3(1.0, 0.5, 0.15)*exp(-pow(length(ndc - vec2(-0.9, -0.7))*2.4, 2.0))*(0.25 + 0.06*sin(uTime*7.0) + 0.04*sin(uTime*13.0));
-    col += vec3(1.0, 0.5, 0.15)*exp(-pow(length(ndc - vec2(0.95, -0.65))*2.6, 2.0))*(0.22 + 0.05*sin(uTime*8.3) + 0.04*sin(uTime*11.7));
-    for (int i = 0; i < 2; i++) { // fireflies: drifting, BLINKING
-      vec2 dp = ndc*(26.0 + float(i)*16.0) + vec2(uTime*(0.5 + float(i)*0.4), uTime*(0.22 + float(i)*0.1));
-      vec2 cellF = floor(dp);
-      vec2 fr = fract(dp) - 0.5;
-      float blinkF = 0.3 + 0.7*pow(0.5 + 0.5*sin(uTime*(1.5 + hash21(cellF)*3.0) + hash21(cellF)*40.0), 3.0);
-      col += vec3(1.0, 0.85, 0.5)*step(0.992, hash21(cellF))*exp(-dot(fr, fr)*16.0)*0.16*blinkF;
-    }
-  } else if (sc == 7) {
-    // ================= CODE =================
-    col = vec3(0.0, 0.012, 0.003);
-    for (int i = 0; i < 3; i++) {
-      float dep = 1.0 + float(i)*0.9;
-      float colW = 0.022*dep;
-      float cx = floor(ndc.x/colW);
-      float speed = 0.4 + hash11(cx*7.1 + float(i)*13.0)*1.4;
-      float head = fract(hash11(cx*3.3 + float(i)*7.0) - uTime*speed*0.22);
-      float y = fract(vNdc.y*0.5 + 0.5);
-      float dy = fract(y - head);
-      float trail = exp(-dy*7.0);
-      vec2 cell = vec2(cx, floor(vNdc.y/ (0.016*dep)));
-      float glyph = step(0.4, hash21(cell + floor(uTime*(4.0 + hash11(cx)*8.0))));
-      float bright = step(dy, 0.012)*2.2 + trail*0.55;
-      col += vec3(0.25, 1.0, 0.4)*glyph*bright*(0.09/dep);
-    }
-    // cascade: one column flashes white and dumps
-    float cSeed = floor(uTime*0.5);
-    if (hash11(cSeed) > 0.7) {
-      float cx2 = (hash11(cSeed + 1.0) - 0.5)*2.4;
-      float cp = fract(uTime*0.5);
-      col += vec3(0.8, 1.0, 0.85)*exp(-pow((ndc.x - cx2)*30.0, 2.0))*exp(-cp*6.0)*smoothstep(1.0 - cp*2.2, 1.0 - cp*2.2 - 0.3, vNdc.y)*0.8;
-    }
-    col *= 0.9 + 0.1*sin(gl_FragCoord.y*1.9);
-  } else if (sc == 8) {
-    // ================= SWEEP (volumetric scanner room) =================
-    col = mix(vec3(0.004, 0.006, 0.010), vec3(0.001, 0.002, 0.004), clamp(length(ndc)*0.8, 0.0, 1.0));
-    // the reciprocating scan plane, visible in the room itself
-    float ph = abs(fract(uTime*0.35)*2.0 - 1.0);
-    float sy = mix(-0.75, 0.75, ph);
-    col += tint*exp(-pow((vNdc.y - sy)*18.0, 2.0))*0.22;
-    col += tint*exp(-pow((vNdc.y - sy)*70.0, 2.0))*0.5;
-    // measurement grid, faint
-    vec2 g = abs(fract(ndc*6.0) - 0.5);
-    col += tint*0.018*step(0.47, max(g.x, g.y));
-    // drifting analysis reticle
-    vec2 rc = ndc - vec2(sin(uTime*0.21)*0.5, cos(uTime*0.17)*0.3);
-    float rD = length(rc);
-    col += tint*exp(-pow((rD - 0.07)*90.0, 2.0))*0.25;
-    col += tint*(step(abs(rc.x), 0.10)*step(abs(rc.y), 0.003) + step(abs(rc.y), 0.10)*step(abs(rc.x), 0.003))*0.22;
-    // corner brackets
-    float bx = step(1.35, abs(ndc.x))*step(abs(vNdc.y), 0.75)*step(0.68, abs(vNdc.y));
-    col += tint*bx*0.15;
+    // ===== CLEARMIND — cool even studio (focus) =====
+    float L = uCustom>0.5?uSLight:0.8, W = uCustom>0.5?uSWarmth:0.4, F = uCustom>0.5?uSFog:0.2;
+    vec3 tone = cct(W);
+    col = mix(vec3(0.10,0.115,0.13), vec3(0.030,0.038,0.05), smoothstep(0.0,1.2,length(ndc)))*tone*(1.2+0.8*L);
+    col += tone*0.10*pool(vec2(ndc.x,(vNdc.y+0.6)*1.4), vec2(0.0,0.0), 1.6)*L; // soft floor
+    col = mix(col, vec3(0.14,0.16,0.19)*tone, F*0.5); // faint depth haze (never sterile)
   } else {
-    // ================= AURORA =================
-    col = mix(vec3(0.004, 0.008, 0.02), vec3(0.001, 0.002, 0.006), clamp((vNdc.y + 1.0)*0.6, 0.0, 1.0));
-    // star dome
-    vec2 sp = ndc*55.0;
-    vec2 fr = fract(sp) - 0.5;
-    col += vec3(0.9, 0.95, 1.0)*step(0.994, hash21(floor(sp)))*exp(-dot(fr, fr)*20.0)*0.3;
-    // aurora curtains: layered fbm ribbons
-    for (int i = 0; i < 3; i++) {
-      float fi = float(i);
-      float band = fbm(vec3(ndc.x*1.1 + fi*3.0, uTime*(0.05 + fi*0.02), fi*9.0));
-      float cy = 0.25 + fi*0.18 + band*0.35;
-      float curtain = exp(-pow((vNdc.y - cy)*3.4, 2.0));
-      float rays = 0.6 + 0.4*sin(ndc.x*(18.0 + fi*7.0) + band*9.0 + uTime*0.4);
-      vec3 acol = mix(vec3(0.1, 0.9, 0.45), vec3(0.5, 0.2, 0.9), fi*0.5);
-      col += acol*curtain*rays*0.10*(1.0 + uGlow*0.5);
-    }
-    // moon + a rare shooting star
-    float mD = length(ndc - vec2(-0.95, 0.62));
-    col += vec3(0.85, 0.9, 1.0)*(exp(-pow((mD - 0.075)*60.0, 2.0))*0.3 + smoothstep(0.075, 0.070, mD)*0.55);
-    col -= vec3(0.10)*smoothstep(0.062, 0.058, length(ndc - vec2(-0.93, 0.63))); // crater shading
-    float ssSeed = floor(uTime*0.17);
-    if (hash11(ssSeed) > 0.75) {
-      float sp2 = fract(uTime*0.17);
-      vec2 sPos = vec2(mix(1.8, 0.4, sp2), mix(0.85, 0.55, sp2));
-      float star2 = exp(-length((ndc - sPos)*vec2(6.0, 40.0)))*exp(-sp2*4.0);
-      col += vec3(0.9, 0.95, 1.0)*star2*0.9;
-    }
-    // snowfield glow at the bottom
-    col += vec3(0.10, 0.14, 0.22)*smoothstep(-0.5, -1.0, vNdc.y)*0.5;
+    // ===== SIGNAL ROOM — stark amber alert (urgent) =====
+    float L = uCustom>0.5?uSLight:0.25, E = uCustom>0.5?uSEnergy:0.3;
+    vec3 accent = mix(vec3(1.0,0.69,0.13), vec3(1.0,0.30,0.30), clamp(uGlow*1.4,0.0,1.0)); // amber -> red on alarm
+    col = vec3(0.02,0.023,0.028)*(0.5+L);
+    // one framing light bar around the subject + slow scan sweep
+    float ring = exp(-pow((length(ndc*vec2(0.9,1.05))-0.58)*13.0,2.0));
+    col += accent*ring*0.4;
+    float scan = exp(-pow((vNdc.y - (fract(t*0.1*(0.5+E))*2.0-1.0))*30.0,2.0));
+    col += accent*scan*0.10;
+    col *= 1.0 - 0.7*smoothstep(0.6,1.25,length(ndc*vec2(0.9,1.0))); // tight vignette
   }
 
-  // ---- shared finish: emotion wash, scanlines, vignette, gamma ----
-  col = mix(col, col*(0.4 + 0.6*uEmoCol/max(max(uEmoCol.r, uEmoCol.g), uEmoCol.b)), uGlow*0.30);
-  col *= 0.92 + 0.08*sin(gl_FragCoord.y*1.7 + uTime*3.0);
-  float vig = 1.0 - 0.42*pow(length(vNdc*vec2(0.75, 0.7)), 2.0);
+  // ---- shared finish ----
+  // PRESENCE BACKING: gently darken behind the floating head so the additive
+  // hologram always has contrast — otherwise it washes out over bright rooms.
+  float backing = exp(-(vNdc.x*vNdc.x*1.6 + (vNdc.y + 0.02)*(vNdc.y + 0.02)*1.15)*2.1);
+  col *= 1.0 - 0.32*backing;
+  // subtle emotion wash, vignette, dither, gamma
+  col = mix(col, col*(0.55 + 0.6*uEmoCol/max(max(uEmoCol.r,uEmoCol.g),uEmoCol.b)), uGlow*0.22);
+  float vig = 1.0 - 0.34*pow(length(vNdc*vec2(0.78,0.72)), 2.2);
   col *= vig;
+  col += (hash21(gl_FragCoord.xy + fract(t)) - 0.5)/220.0; // dither: kills banding on soft gradients
   col = pow(max(col, 0.0), vec3(0.4545));
   outColor = vec4(col, 1.0);
 }

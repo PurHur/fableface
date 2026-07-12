@@ -2,7 +2,7 @@
 
 import { createGL, mat4Perspective, mat4LookAt, mat4Multiply, mat4RotateX, mat4RotateY, mat4RotateZ } from './gl.js';
 import { buildHeadAssets } from './gridmesh.js';
-import { PresenceDriver, MOODS, STATES } from './driver.js';
+import { PresenceDriver, MOODS, STATES, STATE_FLOW, STATE_FLOW_LOOP } from './driver.js';
 import { EMOTION_NAMES, GESTURE_NAMES } from './emotions.js';
 import { SCENES } from './scenes.js';
 import { Speech } from './speech.js';
@@ -101,7 +101,7 @@ async function boot() {
         emit('statechange', { state: st });
         clearTimeout(thinkWatch);
         if (st === 'thinking') {
-          if (prev === 'listening') driver.emote('nod'); // instant acknowledgment (<200ms beats any spinner)
+          // (the acknowledgment nod is played by the driver's state-engine entry beats)
           thinkWatch = setTimeout(() => { // watchdog: a dead backend must not freeze the face
             if (driver.state === 'thinking' && !speech.speaking) driver.setState('idle');
           }, 30000);
@@ -168,6 +168,17 @@ async function boot() {
 
   let active = 'wisp8';
   let sceneIx = 0;
+  let sceneCfg = SCENES[0].params.slice();  // live universal chamber params [light,warmth,fog,energy,ambient]
+  const SCENE_PARAM_KEYS = ['light', 'warmth', 'fog', 'energy', 'ambient'];
+  const sceneTuneControls = {};
+  const clamp01 = v => Math.min(1, Math.max(0, +v));
+  const syncSceneTune = () => { for (const k in sceneTuneControls) sceneTuneControls[k](sceneCfg[SCENE_PARAM_KEYS.indexOf(k)]); };
+  function applySceneParams(params) {
+    if (Array.isArray(params)) { for (let k = 0; k < 5; k++) if (typeof params[k] === 'number') sceneCfg[k] = clamp01(params[k]); }
+    else if (params && typeof params === 'object') { for (const key in params) { const ix = SCENE_PARAM_KEYS.indexOf(key); if (ix >= 0 && typeof params[key] === 'number') sceneCfg[ix] = clamp01(params[key]); } }
+    syncSceneTune();
+  }
+  function setSceneParam(key, val) { const ix = SCENE_PARAM_KEYS.indexOf(key); if (ix < 0) return false; sceneCfg[ix] = clamp01(val); syncSceneTune(); return true; }
   let revealStart = performance.now();
 
   // ---- UI ----
@@ -234,12 +245,15 @@ async function boot() {
     c.addEventListener('click', () => { setScene(i); });
     sceneSel.appendChild(c);
   });
-  function setScene(i) {
+  function setScene(i, params) {
     if (typeof i === 'string') {
       const found = SCENES.findIndex(sc => sc.key === i.toLowerCase());
       i = found >= 0 ? found : parseInt(i, 10) || 0;
     }
     sceneIx = Math.max(0, Math.min(SCENES.length - 1, i | 0));
+    sceneCfg = SCENES[sceneIx].params.slice();   // reset to this chamber's defaults
+    if (params) applySceneParams(params);        // then apply the AI's situational overrides
+    else syncSceneTune();
     sceneSel.querySelectorAll('.scene').forEach(x => x.classList.toggle('on', +x.dataset.scene === sceneIx));
     if (typeof emit === 'function') emit('scenechange', { scene: SCENES[sceneIx].key });
     return SCENES[sceneIx].key;
@@ -276,6 +290,19 @@ async function boot() {
   function resetCfg() { wisp8.cfg = DEFAULT_CFG(); syncTune(); persistCfg(); return true; }
   function buildTune() {
     const body = $('#tune-body');
+    // Chamber (scene) params — the universal dials the AI adjusts per situation
+    const sg = document.createElement('div'); sg.className = 'tune-group-title'; sg.textContent = 'Chamber'; body.appendChild(sg);
+    [['light', 'Light / day'], ['warmth', 'Warmth'], ['fog', 'Fog / haze'], ['energy', 'Energy'], ['ambient', 'Ambient life']].forEach(([key, label]) => {
+      const ix = SCENE_PARAM_KEYS.indexOf(key);
+      const row = document.createElement('div'); row.className = 'tune-row';
+      const lab = document.createElement('span'); lab.className = 'tune-label'; lab.textContent = label; row.appendChild(lab);
+      const inp = document.createElement('input'); inp.type = 'range'; inp.min = 0; inp.max = 1; inp.step = 0.02; inp.value = sceneCfg[ix];
+      const val = document.createElement('span'); val.className = 'tune-val'; val.textContent = (+sceneCfg[ix]).toFixed(2);
+      inp.addEventListener('input', () => { val.textContent = (+inp.value).toFixed(2); setSceneParam(key, parseFloat(inp.value)); });
+      row.appendChild(inp); row.appendChild(val);
+      sceneTuneControls[key] = v => { inp.value = v; val.textContent = (+v).toFixed(2); };
+      body.appendChild(row);
+    });
     Wisp8Face.PARAMS.forEach(group => {
       const gt = document.createElement('div'); gt.className = 'tune-group-title'; gt.textContent = group.group; body.appendChild(gt);
       group.items.forEach(it => {
@@ -464,6 +491,7 @@ async function boot() {
       headRot, invHeadRot, headPos: _headPos,
       gazeDir: _gazeDir,
       scene: SCENES[sceneIx],
+      sceneP: sceneCfg,
     };
 
     gl.viewport(0, 0, canvas.width, canvas.height);
@@ -496,6 +524,8 @@ async function boot() {
     react: (name, intensity = 0.8, decay = 1.4) => driver.react(name, intensity, decay),
     emote: (name) => driver.emote(name),
     setState: (st) => driver.setState(st),
+    // the RECOMMENDED (open, non-binding) companion state lifecycle + default anims
+    stateFlow: () => ({ states: STATE_FLOW, loop: STATE_FLOW_LOOP }),
     // speech — supports inline [emotion]/[gesture] tags + auto cues
     say: (text, opts = {}) => { speech.speak(text, opts); return true; },
     stop: () => {
@@ -515,7 +545,9 @@ async function boot() {
     wake: () => driver.wake(),
     setAutopilot: (on) => { driver.setAutopilot(on); return true; },
     setFace: (key) => { select(key); return active === key; },
-    setScene: (which) => setScene(which),
+    setScene: (which, params) => setScene(which, params),
+    setSceneParam: (key, val) => setSceneParam(key, val),
+    getScene: () => ({ scene: SCENES[sceneIx].key, params: Object.fromEntries(SCENE_PARAM_KEYS.map((k, i) => [k, sceneCfg[i]])) }),
     // choreography: one call scripts a whole beat.
     // perform([{at:0, cmd:'setEmotion', args:['joy']}, {at:1.2, cmd:'emote', args:['nod']},
     //          {at:1.5, cmd:'say', args:['[delight] It works!']}])
@@ -632,6 +664,58 @@ async function boot() {
       }, 3000);
     }
   } else if (simPanel && qs.get('sim') === '0') simPanel.style.display = 'none';
+
+  // ================= LIVE INTERACTION =================
+  // The face reacts to the user in REAL TIME: the instant they focus or type in
+  // the prompt it attends (listening state + entry perk), reads sentiment from
+  // what's typed so far and reacts async, then settles back when they're done.
+  // This is the surface for testing real live companion interactions.
+  const sayEl = $('#say');
+  let liveReturn = null, liveTypeT = null, liveLastCue = '';
+  const stopSimForLive = () => { if (sim && sim.running) sim.stop(); };
+  function liveAttend() {
+    stopSimForLive();
+    driver.setAutopilot(false);
+    clearTimeout(liveReturn);
+    if (driver.state !== 'listening' && driver.state !== 'speaking') driver.setState('listening');
+  }
+  function liveRelax(delay = 1500) {
+    clearTimeout(liveReturn);
+    liveReturn = setTimeout(() => {
+      if (!speech.speaking && !sayEl.value.trim() && document.activeElement !== sayEl && !(sim && sim.running)) {
+        driver.setState('idle');
+        driver.setAutopilot(true);
+      }
+    }, delay);
+  }
+  function liveSentiment(v) {
+    let cue = '';
+    if (/\b(haha+|hehe|lol|:\)|:d)\s*$/.test(v)) cue = 'laugh';
+    else if (/\b(sad|sorry|cry|awful|terrible|hurt|alone|tired|worried|stressed)\b/.test(v)) cue = 'concerned';
+    else if (/\b(great|love|amazing|wonderful|awesome|yay|thanks|thank you|perfect|beautiful)\b/.test(v)) cue = 'joy';
+    else if (/\b(wow|whoa|incredible|unbelievable)\b/.test(v)) cue = 'awe';
+    else if (/\?\s*$/.test(v)) cue = 'curious';
+    else if (/!\s*$/.test(v)) cue = 'surprise';
+    if (cue && cue !== liveLastCue) {
+      liveLastCue = cue;
+      if (cue === 'laugh') driver.emote('laugh'); else driver.react(cue, 0.5, 2.0);
+    }
+    if (!v) liveLastCue = '';
+  }
+  sayEl.addEventListener('focus', () => { liveAttend(); driver.react('curious', 0.22, 1.4); });
+  sayEl.addEventListener('blur', () => liveRelax());
+  sayEl.addEventListener('input', () => {
+    liveAttend();
+    driver.listenLevel(0.7);                       // typing reads as "the user is speaking"
+    clearTimeout(liveTypeT);
+    liveTypeT = setTimeout(() => liveSentiment(sayEl.value.toLowerCase()), 70);
+  });
+  // after the AI finishes a live reply (not during the scripted sim), settle to idle
+  api.on('speechend', () => {
+    if (!(sim && sim.running) && document.activeElement !== sayEl && !sayEl.value.trim()) {
+      setTimeout(() => { if (!speech.speaking && driver.state !== 'sleeping') { driver.setState('idle'); driver.setAutopilot(true); } }, 400);
+    }
+  });
 
   window.dispatchEvent(new Event('fableface-ready'));
 }

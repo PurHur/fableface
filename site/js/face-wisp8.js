@@ -326,7 +326,7 @@ void main(){
       vec2 off = fract(aSeed*9.0) < 0.5 ? vec2(along, 0.0) : vec2(0.0, along);
       p = vec3(cs2.x*(0.175 - off.x), cs2.y*(0.165 - off.y) - 0.01, 0.0);
       base = holo*0.85;
-    } else if (fx == 10) { // CHAMBER II: an orrery of orbital motes around the head
+    } else if (fx == 10 || fx == 24) { // orrery of orbital motes (Chamber II / Observatory)
       float plane = floor(fract(aSeed*11.0)*5.0);              // 5 orbital planes
       float oang = aSeed*97.0 + uTime*(0.22 + plane*0.10)*motion;
       float orad = 0.150 + plane*0.020 + (fract(aSeed*53.0) - 0.5)*0.012;
@@ -342,6 +342,22 @@ void main(){
       float opulse = 0.5 + 0.5*pow(0.5 + 0.5*sin(oang*2.0 + uTime*1.6*motion), 2.0);
       base = mix(holo*1.25, vec3(0.95, 1.0, 1.1), olead*0.8)*opulse*(1.15 + 0.7*uGlow);
       vFade0 *= (0.5 + 0.5*fract(aSeed*29.0))*(0.7 + 0.6*olead);
+    } else if (fx >= 20) { // chamber ambient life around the head (tinted per room)
+      float ang = aSeed*6.2831 + uTime*(0.04 + fract(aSeed*7.0)*0.06)*motion;
+      float rad = 0.135 + fract(aSeed*31.0)*0.10;
+      float rise = fract(uTime*(0.045 + fract(aSeed*13.0)*0.07)*motion + aSeed*17.0);
+      p = vec3(cos(ang)*rad + sin(uTime*0.5 + aSeed*40.0)*0.010,
+               -0.15 + rise*0.36 + (fract(aSeed*5.0) - 0.5)*0.05,
+               sin(ang)*rad*0.7);
+      vec3 mc = holo;
+      if (fx == 21) mc = vec3(1.0, 0.5, 0.2);          // hearth embers
+      else if (fx == 22) mc = vec3(0.75, 1.0, 0.55);   // verdant pollen
+      else if (fx == 25) mc = vec3(1.0, 0.8, 0.45);    // terrace sparks
+      else if (fx == 20) mc = vec3(1.0, 0.95, 0.82);   // solarium dust
+      else if (fx == 23) mc = vec3(0.72, 0.9, 0.96);   // stillwater mist
+      float amb = (fx == 26 || fx == 27) ? 0.28 : 1.0; // clearmind / signal: minimal
+      base = mc*(0.4 + 0.6*fract(aSeed*29.0));
+      vFade0 *= sin(rise*3.14159)*0.9*amb;
     } else { // CHAMBER: the original instrument rings (emotion arc + voice waveform)
       float innerR = step(aSeed, 0.4999);
       float dir = innerR > 0.5 ? 1.0 : -1.0;
@@ -673,7 +689,7 @@ void main(){
              * (0.80 + uLevel*0.42 + uGlow*0.28 + uGestureW*0.22 + emoBand*2.0)*breathAmp*depthF;
   if (isContour) amp2 = tw*moire*(1.5 + flowPulse*2.2 + sweep*0.8 + ripple*2.2 + storm*1.4 + pulse*1.8 + emoBand*2.2)*(0.9 + uLevel*0.4 + uGlow*0.28 + uGestureW*0.25)*depthF*(1.0 - 0.5*noseM);
   if (isIris) amp2 = (1.6 + uLevel*0.3 + uGlow*0.2)*uIrisK;
-  if (isRing) amp2 = (fx == 10 ? 2.0 : 1.0);
+  if (isRing) amp2 = ((fx == 10 || fx == 24) ? 2.0 : fx >= 20 ? 1.4 : 1.0);
   if (isCore) amp2 = tw*moire*(0.9 + storm*1.6)*(0.8 + uGlow*0.3 + uGestureW*0.3 + emoBand*2.0);
   if (isCircuit) amp2 = tw*(0.85 + storm)*moire*(0.8 + uGlow*0.25 + emoBand*1.6);
   if (isConduit) amp2 = 1.3;
@@ -719,7 +735,7 @@ void main(){
   float sz = isRing ? 0.0009 : isIris ? 0.00085 : isContour ? 0.0011
            : isConduit ? 0.0013 : isCore ? 0.0017 : isCircuit ? 0.0010
            : (spark > 0.5 ? 0.0012 : 0.0016)*(0.8 + 0.6*aSeed);
-  sz *= (1.0 + neuronSpike*1.6)*(1.0 + blur*1.1)*(fx == 6 ? 1.3 : 1.0)*(isRing && fx == 10 ? 2.0 : 1.0);
+  sz *= (1.0 + neuronSpike*1.6)*(1.0 + blur*1.1)*(fx == 6 ? 1.3 : 1.0)*(isRing && (fx == 10 || fx == 24) ? 2.0 : isRing && fx >= 20 ? 1.5 : 1.0);
   gl_PointSize = clamp(sz*uPixelScale/max(-viewPos.z, 0.05), 1.0, 9.0);
 }
 `;
@@ -1250,6 +1266,15 @@ export class Wisp8Face {
     gl.uniform1f(this.bgU.uGlow, s.glow || 0);
     gl.uniform3fv(this.bgU.uEmoCol, this._col);
     if (this.bgU.uScene) gl.uniform1f(this.bgU.uScene, (cm.scene && cm.scene.bg) || 0);
+    // universal chamber params (WISP VIII drives them live; other faces leave
+    // uCustom at 0 → each chamber uses its baked defaults)
+    const sp = cm.sceneP || [0.6, 0.5, 0.4, 0.4, 0.5];
+    if (this.bgU.uCustom) gl.uniform1f(this.bgU.uCustom, 1);
+    if (this.bgU.uSLight) gl.uniform1f(this.bgU.uSLight, sp[0]);
+    if (this.bgU.uSWarmth) gl.uniform1f(this.bgU.uSWarmth, sp[1]);
+    if (this.bgU.uSFog) gl.uniform1f(this.bgU.uSFog, sp[2]);
+    if (this.bgU.uSEnergy) gl.uniform1f(this.bgU.uSEnergy, sp[3]);
+    if (this.bgU.uSAmb) gl.uniform1f(this.bgU.uSAmb, sp[4]);
     gl.bindVertexArray(this.quadVao);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 

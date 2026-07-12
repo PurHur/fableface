@@ -21,21 +21,23 @@ const SCRIPT = [
   },
   {
     op: 'Can we go somewhere beautiful?',
-    pre: [{ cmd: 'setScene', args: ['chamber2'], at: 1.2 }],
-    reply: '[awe] Let the stage light up. [curious] Watch the motes orbit... [warm] I love it in here.',
+    pre: [{ cmd: 'setScene', args: ['observatory'], at: 1.2 }],
+    reply: '[awe] Then let us go to the stars. [curious] Watch the orrery turn... [warm] I do my best thinking out here.',
   },
   {
     op: 'Bad news — the demo budget was cut.',
+    pre: [{ cmd: 'setScene', args: ['hearth', { light: 0.22, warmth: 1.0 }], at: 0.6 }],
     reply: '[surprise] What?! [gasp] [concerned] Oh no... [sad] I see. [determined] Then we make every particle count.',
   },
   {
     op: 'Relax — just kidding!',
-    pre: [{ cmd: 'setScene', args: ['chamber'], at: 0.5 }],
+    pre: [{ cmd: 'setScene', args: ['solarium'], at: 0.5 }],
     reply: '[irritated] That was mean, operator. [mischievous] ...but I will allow it. [wink] [joy] This time.',
   },
   {
     op: 'It is late. Rest now — I will bring the next visitor tomorrow.',
-    reply: '[sleepy] Mmm... then dim the chamber. [warm] Wake me gently. Good night, operator.',
+    pre: [{ cmd: 'setScene', args: ['stillwater', { light: 0.15 }], at: 0.4 }],
+    reply: '[sleepy] Mmm... then dim the water. [warm] Wake me gently. Good night, operator.',
     after: [{ cmd: 'sleep', args: [], at: 1.0 }, { cmd: 'wake', args: [], at: 6.0 }],
   },
 ];
@@ -174,7 +176,7 @@ export function makeSimulation(api, root) {
     feed.innerHTML = '';
     el('sim-note', '— LIVE SIMULATION · every chip is a real SDK event —');
     api.setAutopilot(false);
-    api.setScene('chamber');
+    api.setScene('solarium');
     api.setEmotion('neutral', 1);
     await sleep(800);
     for (const step of SCRIPT) {
@@ -192,7 +194,7 @@ export function makeSimulation(api, root) {
       await sleep(rnd(900, 1500));
     }
     if (!stopFlag) {
-      el('sim-note', '— SIMULATION COMPLETE — everything you saw was driven through FableFace.* —');
+      el('sim-note', '— SIMULATION COMPLETE — now type in the prompt below: the face reacts live as you go —');
       api.setAutopilot(true);
     }
     running = false;

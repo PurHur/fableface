@@ -27,14 +27,15 @@ provably the same head.
 
 ## Gallery
 
-**WISP VIII "ANIMA"** — the configurable default, shown in the new **Chamber II**
-arena with an orrery of motes orbiting the head:
+**WISP VIII "ANIMA"** — the configurable default, shown in the **Observatory**
+chamber with an orrery of motes orbiting the head:
 
-![WISP VIII in Chamber II](shots/wisp8-hero.png)
+![WISP VIII in the Observatory chamber](shots/wisp8-hero.png)
 
 It takes the PORTRAIT pipeline further on every axis — a wider two-octave bloom, a
-new anamorphic lens streak, a themeable base colour, a stronger portrait key and
-brighter catchlights — and exposes all of it as live config (see below).
+new anamorphic lens streak, a themeable base colour, a stronger portrait key,
+brighter catchlights, a neural brain that lights up while thinking, and a defined
+nose — all exposed as live config (see below).
 
 ### The lineage that led here
 
@@ -77,19 +78,49 @@ opacity), **Light** (key, rim/fresnel, warm counter-rim, catchlights, iris),
 shimmer, sparkle), **Depth** (depth-of-field, fog), and **Toggles** (glass
 shell, scene rings, floor reflection).
 
-## Scenes
+## Chambers — realistic rooms the companion inhabits
 
-Two rooms, both chamber-family:
+Eight soft, volumetric environments (no hard grids) the AI chooses to fit the
+moment. Design + research (colour-temperature psychology, biophilic/prospect-refuge
+principles, atmospheric shader recipes) in
+[`docs/chambers-design-2026-07.md`](docs/chambers-design-2026-07.md).
 
-- **Chamber II** *(default)* — a soft luminous stage: volumetric key beams, a
-  glowing pedestal, soft concentric rings and drifting motes, with an **orrery**
-  of orbital particles sweeping around the head. No hard grid; it renders at the
-  same fidelity as the face.
-- **Chamber** — the original holo-room: perspective grid floor, data walls and a
-  rotating instrument dais.
+| | | | |
+|:-:|:-:|:-:|:-:|
+| ![Solarium](shots/chambers/solarium.png) | ![Hearth](shots/chambers/hearth.png) | ![Verdant](shots/chambers/verdant.png) | ![Stillwater](shots/chambers/stillwater.png) |
+| **Solarium** · greeting | **Hearth** · comfort | **Verdant** · calm | **Stillwater** · rest |
+| ![Observatory](shots/chambers/observatory.png) | ![Terrace](shots/chambers/terrace.png) | ![Clearmind](shots/chambers/clearmind.png) | ![Signal Room](shots/chambers/signal.png) |
+| **Observatory** · thinking | **Terrace** · celebration | **Clearmind** · focus | **Signal Room** · alert |
 
-Switch with the SCENE chips, `FableFace.setScene('chamber2'|'chamber')`, or
-`?scene=`.
+Each chamber accepts **universal parameters** the AI dials per situation —
+`light` (time-of-day), `warmth`, `fog`, `energy`, `ambient` — and carries a
+signature particle life around the head (embers, pollen, sparks, an orrery…):
+
+```js
+FableFace.setScene('hearth', { light: 0.2, warmth: 1.0 }); // warm, dim fireside
+FableFace.setSceneParam('fog', 0.8);
+FableFace.getScene();  // { scene, params: { light, warmth, fog, energy, ambient } }
+```
+
+Also on the SCENE chips, the **Chamber** section of the TUNE panel, and `?scene=`.
+
+## State engine — recommended, not required
+
+A companion lifecycle **`idle → listening → thinking → speaking → idle`** with a
+distinct default animation per state and per transition (an attentive perk on
+*listening*, an acknowledgment nod on *listening→thinking*, a startle on *alert*,
+a gentle rouse on *wake*). It's a **recommendation** — the API is fully open, so a
+steering AI can `setState()` to anything at any time. Inspect it with
+`FableFace.stateFlow()`.
+
+## Live interaction
+
+The face reacts to the user in **real time**: focus the prompt and it attends
+(*listening*); as you type it reads sentiment from what you've written so far and
+reacts asynchronously (a question → curious, thanks → joy, "sorry" → concerned,
+"!" → surprise, "haha" → a laugh), then settles back to idle when you're done.
+This is the surface for testing real live companion interactions — no backend
+needed.
 
 ## Liveness
 
